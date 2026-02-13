@@ -1,0 +1,415 @@
+"use client";
+
+import { useState, useMemo } from "react";
+import { toast } from "sonner";
+import { trpc } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Plus,
+  MoreHorizontal,
+  CheckCircle2,
+  Circle,
+  Calendar,
+  GripVertical,
+} from "lucide-react";
+import { Card } from "@/components/ui/card";
+import {
+  DndContext,
+  DragOverlay,
+  closestCorners,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragStartEvent,
+  type DragEndEvent,
+  type DragOverEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+
+interface ProjectBoardViewProps {
+  projectId: string;
+  onTaskClick: (taskId: string) => void;
+}
+
+type TaskItem = {
+  id: string;
+  title: string;
+  status: string;
+  dueDate: string | Date | null;
+  assignee: { name: string } | null;
+  taskProjects?: { sectionId: string | null }[];
+  _count?: { subtasks: number; comments: number; attachments: number };
+  tags?: { tag: { name: string; color: string } }[];
+};
+
+function SortableTaskCard({
+  task,
+  onTaskClick,
+  onComplete,
+}: {
+  task: TaskItem;
+  onTaskClick: (id: string) => void;
+  onComplete: (id: string) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: task.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  const formatDate = (date: string | Date | null) => {
+    if (!date) return null;
+    const d = new Date(date);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+
+  return (
+    <Card
+      ref={setNodeRef}
+      style={style}
+      className="cursor-pointer border bg-white p-3 shadow-sm transition-shadow hover:shadow-md"
+      onClick={() => onTaskClick(task.id)}
+    >
+      <div className="flex items-start gap-2">
+        <div
+          {...attributes}
+          {...listeners}
+          className="mt-0.5 flex-shrink-0 cursor-grab opacity-0 transition-opacity group-hover:opacity-100"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
+        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onComplete(task.id);
+          }}
+          className="mt-0.5 flex-shrink-0"
+        >
+          {task.status === "COMPLETE" ? (
+            <CheckCircle2 className="h-4 w-4 text-green-600" />
+          ) : (
+            <Circle className="h-4 w-4 text-[#cfcbcb] hover:text-green-600" />
+          )}
+        </button>
+        <span
+          className={cn(
+            "text-sm",
+            task.status === "COMPLETE" &&
+              "text-muted-foreground line-through"
+          )}
+        >
+          {task.title}
+        </span>
+      </div>
+
+      {/* Tags */}
+      {task.tags && task.tags.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1 pl-8">
+          {task.tags.map(({ tag }) => (
+            <span
+              key={tag.name}
+              className="rounded-full px-1.5 py-0.5 text-[10px] font-medium text-white"
+              style={{ backgroundColor: tag.color }}
+            >
+              {tag.name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {(task.assignee || task.dueDate) && (
+        <div className="mt-2 flex items-center justify-between pl-8">
+          <div>
+            {task.dueDate && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Calendar className="h-3 w-3" />
+                {formatDate(task.dueDate)}
+              </span>
+            )}
+          </div>
+          {task.assignee && (
+            <Avatar className="h-5 w-5">
+              <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
+                {task.assignee.name
+                  ?.split(" ")
+                  .map((n) => n[0])
+                  .join("")}
+              </AvatarFallback>
+            </Avatar>
+          )}
+        </div>
+      )}
+
+      {/* Subtask/comment count */}
+      {task._count && (task._count.subtasks > 0 || task._count.comments > 0) && (
+        <div className="mt-2 flex items-center gap-3 pl-8 text-xs text-muted-foreground">
+          {task._count.subtasks > 0 && (
+            <span>{task._count.subtasks} subtask{task._count.subtasks > 1 ? "s" : ""}</span>
+          )}
+          {task._count.comments > 0 && (
+            <span>{task._count.comments} comment{task._count.comments > 1 ? "s" : ""}</span>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+export function ProjectBoardView({
+  projectId,
+  onTaskClick,
+}: ProjectBoardViewProps) {
+  const { data: sections } = trpc.sections.list.useQuery({ projectId });
+  const { data: tasks } = trpc.tasks.list.useQuery({ projectId });
+  const utils = trpc.useUtils();
+
+  const [addingTaskInSection, setAddingTaskInSection] = useState<string | null>(null);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const createTask = trpc.tasks.create.useMutation({
+    onSuccess: () => {
+      utils.tasks.list.invalidate({ projectId });
+      setNewTaskTitle("");
+      setAddingTaskInSection(null);
+    },
+  });
+
+  const completeTask = trpc.tasks.complete.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+  });
+
+  const moveTask = trpc.tasks.move.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+  });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor)
+  );
+
+  const tasksBySectionId = useMemo(() => {
+    const map: Record<string, TaskItem[]> = {};
+    if (!sections || !tasks) return map;
+    for (const section of sections) {
+      map[section.id] = tasks.filter((task) =>
+        task.taskProjects?.some((tp) => tp.sectionId === section.id)
+      );
+    }
+    return map;
+  }, [sections, tasks]);
+
+  const activeTask = activeId
+    ? tasks?.find((t) => t.id === activeId)
+    : null;
+
+  const handleAddTask = (sectionId: string) => {
+    if (!newTaskTitle.trim()) return;
+    createTask.mutate({
+      title: newTaskTitle.trim(),
+      projectId,
+      sectionId,
+    });
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+
+    if (!over || active.id === over.id) return;
+
+    // Determine the target section
+    const overTask = tasks?.find((t) => t.id === over.id);
+    const targetSectionId = overTask
+      ? overTask.taskProjects?.[0]?.sectionId
+      : sections?.find((s) => s.id === over.id)?.id;
+
+    if (targetSectionId) {
+      const sectionTasks = tasksBySectionId[targetSectionId] || [];
+      const overIndex = sectionTasks.findIndex((t) => t.id === over.id);
+      const position = overIndex >= 0 ? overIndex + 1 : sectionTasks.length + 1;
+
+      moveTask.mutate({
+        taskId: active.id as string,
+        projectId,
+        sectionId: targetSectionId,
+        position,
+      });
+    }
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    // Could add hover effects here
+  };
+
+  const formatDate = (date: string | Date | null) => {
+    if (!date) return null;
+    const d = new Date(date);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragOver={handleDragOver}
+    >
+      <div className="flex h-full gap-4 overflow-x-auto p-6">
+        {sections?.map((section) => {
+          const sectionTasks = tasksBySectionId[section.id] || [];
+          const taskIds = sectionTasks.map((t) => t.id);
+
+          return (
+            <div
+              key={section.id}
+              className="flex w-[280px] flex-shrink-0 flex-col"
+            >
+              {/* Column Header */}
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-[#1e1f21]">
+                  {section.name}
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    {sectionTasks.length}
+                  </span>
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => toast.info("Section settings coming soon")}
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+
+              {/* Task Cards */}
+              <div className="flex-1 space-y-2 overflow-y-auto">
+                <SortableContext
+                  items={taskIds}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {sectionTasks.map((task) => (
+                    <SortableTaskCard
+                      key={task.id}
+                      task={task}
+                      onTaskClick={onTaskClick}
+                      onComplete={(id) => completeTask.mutate({ id })}
+                    />
+                  ))}
+                </SortableContext>
+
+                {/* Add Task */}
+                {addingTaskInSection === section.id ? (
+                  <Card className="border bg-white p-3">
+                    <Input
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAddTask(section.id);
+                        if (e.key === "Escape") {
+                          setAddingTaskInSection(null);
+                          setNewTaskTitle("");
+                        }
+                      }}
+                      onBlur={() => {
+                        if (newTaskTitle.trim()) handleAddTask(section.id);
+                        else {
+                          setAddingTaskInSection(null);
+                          setNewTaskTitle("");
+                        }
+                      }}
+                      placeholder="Task name"
+                      className="h-7 border-none bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+                      autoFocus
+                    />
+                  </Card>
+                ) : (
+                  <button
+                    onClick={() => setAddingTaskInSection(section.id)}
+                    className="flex w-full items-center gap-1.5 rounded-lg border border-dashed py-2 text-sm text-muted-foreground transition-colors hover:border-solid hover:bg-white"
+                  >
+                    <Plus className="mx-auto h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Add Section Column */}
+        <div className="flex w-[280px] flex-shrink-0 items-start">
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-2 text-sm text-muted-foreground"
+          >
+            <Plus className="h-4 w-4" />
+            Add section
+          </Button>
+        </div>
+      </div>
+
+      {/* Drag Overlay */}
+      <DragOverlay>
+        {activeTask ? (
+          <Card className="w-[260px] border bg-white p-3 shadow-lg">
+            <div className="flex items-start gap-2">
+              {activeTask.status === "COMPLETE" ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-600" />
+              ) : (
+                <Circle className="mt-0.5 h-4 w-4 flex-shrink-0 text-[#cfcbcb]" />
+              )}
+              <span className="text-sm">{activeTask.title}</span>
+            </div>
+            {(activeTask.assignee || activeTask.dueDate) && (
+              <div className="mt-2 flex items-center justify-between">
+                <div>
+                  {activeTask.dueDate && (
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Calendar className="h-3 w-3" />
+                      {formatDate(activeTask.dueDate)}
+                    </span>
+                  )}
+                </div>
+                {activeTask.assignee && (
+                  <Avatar className="h-5 w-5">
+                    <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
+                      {activeTask.assignee.name
+                        ?.split(" ")
+                        .map((n) => n[0])
+                        .join("")}
+                    </AvatarFallback>
+                  </Avatar>
+                )}
+              </div>
+            )}
+          </Card>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
