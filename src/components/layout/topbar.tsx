@@ -14,6 +14,9 @@ import {
   CheckSquare,
   ChevronRight,
   Plug,
+  CircleDot,
+  Target,
+  User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -24,8 +27,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import Link from "next/link";
+import { trpc } from "@/lib/trpc";
 import { AiChatPanel } from "@/components/ai/ai-chat-panel";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { DndMenu } from "@/components/notifications/dnd-menu";
@@ -35,7 +39,82 @@ export function Topbar() {
   const router = useRouter();
   const pathname = usePathname();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showDropdown, setShowDropdown] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [aiChatOpen, setAiChatOpen] = useState(false);
+
+  const { data: workspaces } = trpc.workspaces.list.useQuery();
+  const workspaceId = workspaces?.[0]?.id;
+
+  const { data: searchResults } = trpc.search.global.useQuery(
+    { query: searchQuery, workspaceId: workspaceId! },
+    { enabled: !!workspaceId && searchQuery.length >= 1 }
+  );
+
+  // Static navigation pages for search — covers every corner of the site
+  const NAV_PAGES = [
+    { label: "Home", href: "/home", icon: "🏠", keywords: "dashboard home overview" },
+    { label: "My Tasks", href: "/my-tasks", icon: "✓", keywords: "tasks todo my tasks assigned" },
+    { label: "Inbox", href: "/inbox", icon: "📥", keywords: "inbox messages notifications" },
+    { label: "Goals", href: "/goals", icon: "🎯", keywords: "goals objectives targets okr" },
+    { label: "Portfolios", href: "/portfolios", icon: "📁", keywords: "portfolios collections" },
+    { label: "Reporting", href: "/reporting", icon: "📊", keywords: "reporting reports analytics charts" },
+    { label: "Workload", href: "/workload", icon: "⚖️", keywords: "workload capacity team load" },
+    { label: "Settings", href: "/settings", icon: "⚙️", keywords: "settings preferences configuration" },
+    { label: "Admin Console", href: "/admin", icon: "🛡️", keywords: "admin console workspace management" },
+    { label: "Integrations", href: "/integrations", icon: "🔌", keywords: "integrations slack github jira figma zapier google drive" },
+    // Settings sub-sections
+    { label: "Profile Settings", href: "/settings?tab=profile", icon: "👤", keywords: "profile name email job title department bio about me" },
+    { label: "Profile Picture", href: "/settings?tab=profile", icon: "📷", keywords: "profile picture avatar photo upload image" },
+    { label: "Notification Settings", href: "/settings?tab=notifications", icon: "🔔", keywords: "notification settings email alerts in-app mentions comments" },
+    { label: "Two-Factor Authentication (2FA)", href: "/settings?tab=security", icon: "🔐", keywords: "2fa two factor authentication security qr code backup codes mfa" },
+    { label: "Change Password", href: "/settings?tab=security", icon: "🔑", keywords: "password change update reset security" },
+    { label: "Delete Account", href: "/settings?tab=security", icon: "🗑️", keywords: "delete account remove deactivate" },
+    { label: "Dark Mode / Theme", href: "/settings?tab=display", icon: "🌙", keywords: "dark mode light mode theme system appearance display" },
+    { label: "Sidebar Color", href: "/settings?tab=display", icon: "🎨", keywords: "sidebar color appearance customize" },
+    { label: "Compact Mode", href: "/settings?tab=display", icon: "📐", keywords: "compact mode density spacing" },
+    { label: "Language", href: "/settings?tab=display", icon: "🌐", keywords: "language locale español français deutsch 日本語 english" },
+  ];
+
+  const filteredPages = searchQuery.length >= 1
+    ? NAV_PAGES.filter(p => {
+        const q = searchQuery.toLowerCase();
+        return p.label.toLowerCase().includes(q) || p.keywords.toLowerCase().includes(q);
+      })
+    : NAV_PAGES.slice(0, 10); // Show only main pages when no query
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  // Cmd+K shortcut
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        inputRef.current?.focus();
+        setShowDropdown(true);
+      }
+    };
+    document.addEventListener("keydown", down);
+    return () => document.removeEventListener("keydown", down);
+  }, []);
+
+  const hasResults = filteredPages.length > 0 || (searchResults && (
+    searchResults.tasks.length > 0 ||
+    searchResults.projects.length > 0 ||
+    (searchResults.people && searchResults.people.length > 0) ||
+    (searchResults.goals && searchResults.goals.length > 0)
+  ));
 
   const breadcrumbs = useMemo(() => {
     const crumbs: { label: string; href: string }[] = [];
@@ -117,18 +196,190 @@ export function Topbar() {
         )}
       </div>
 
-      {/* Center - Search */}
-      <div className="flex max-w-lg flex-1 items-center justify-center px-4">
-        <button
-          onClick={() => setSearchOpen(true)}
-          className="flex h-8 w-full max-w-md items-center gap-2 rounded-md border bg-muted/40 px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/60"
-        >
-          <Search className="h-4 w-4" />
-          <span>Search</span>
-          <kbd className="ml-auto rounded border bg-white px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-            ⌘K
-          </kbd>
-        </button>
+      {/* Center - Search with inline dropdown */}
+      <div ref={searchRef} className="relative flex max-w-lg flex-1 items-center justify-center px-4">
+        <div className="relative w-full max-w-md">
+          <div className="flex h-8 w-full items-center gap-2 rounded-md border bg-muted/40 px-3 transition-colors focus-within:border-[#4573D2] focus-within:bg-white">
+            <Search className="h-4 w-4 text-muted-foreground" />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search tasks, projects, people..."
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setShowDropdown(true);
+              }}
+              onFocus={() => setShowDropdown(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setShowDropdown(false);
+                  inputRef.current?.blur();
+                }
+              }}
+            />
+            {!searchQuery && (
+              <kbd className="rounded border bg-white px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                ⌘K
+              </kbd>
+            )}
+            {searchQuery && (
+              <button
+                onClick={() => { setSearchQuery(""); setShowDropdown(false); }}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* Search Dropdown */}
+          {showDropdown && (
+            <div className="absolute top-full left-0 z-50 mt-1 w-full rounded-lg border bg-white shadow-lg dark:bg-card">
+              <div className="max-h-[400px] overflow-y-auto py-2">
+                {searchQuery.length >= 1 && !hasResults && (
+                  <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                    No results for &quot;{searchQuery}&quot;
+                  </div>
+                )}
+
+                {/* Navigation Pages */}
+                {filteredPages.length > 0 && (
+                  <div>
+                    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Pages
+                    </div>
+                    {filteredPages.map((page) => (
+                      <button
+                        key={page.label}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50"
+                        onClick={() => {
+                          router.push(page.href);
+                          setShowDropdown(false);
+                          setSearchQuery("");
+                        }}
+                      >
+                        <span className="w-4 text-center text-xs">{page.icon}</span>
+                        <span className="flex-1 truncate">{page.label}</span>
+                        <span className="text-[10px] text-muted-foreground">{page.href}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Tasks */}
+                {searchResults?.tasks && searchResults.tasks.length > 0 && (
+                  <div className={filteredPages.length > 0 ? "mt-1 border-t pt-1" : ""}>
+                    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Tasks
+                    </div>
+                    {searchResults.tasks.slice(0, 5).map((task) => (
+                      <button
+                        key={task.id}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50"
+                        onClick={() => {
+                          const projectId = task.taskProjects?.[0]?.project?.id;
+                          if (projectId) router.push(`/projects/${projectId}`);
+                          setShowDropdown(false);
+                          setSearchQuery("");
+                        }}
+                      >
+                        <CircleDot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="flex-1 truncate">{task.title}</span>
+                        {task.assignee && (
+                          <span className="text-[10px] text-muted-foreground">{task.assignee.name}</span>
+                        )}
+                        {task.taskProjects?.[0]?.project && (
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {task.taskProjects[0].project.name}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Projects */}
+                {searchResults?.projects && searchResults.projects.length > 0 && (
+                  <div className="mt-1 border-t pt-1">
+                    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Projects
+                    </div>
+                    {searchResults.projects.map((project) => (
+                      <button
+                        key={project.id}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50"
+                        onClick={() => {
+                          router.push(`/projects/${project.id}`);
+                          setShowDropdown(false);
+                          setSearchQuery("");
+                        }}
+                      >
+                        <div
+                          className="h-3 w-3 shrink-0 rounded-sm"
+                          style={{ backgroundColor: (project as any).color || "#4573D2" }}
+                        />
+                        <span className="flex-1 truncate">{project.name}</span>
+                        {project.team && (
+                          <span className="text-[10px] text-muted-foreground">{project.team.name}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* People */}
+                {searchResults?.people && searchResults.people.length > 0 && (
+                  <div className="mt-1 border-t pt-1">
+                    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      People
+                    </div>
+                    {searchResults.people.map((person: any) => (
+                      <button
+                        key={person.id}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50"
+                        onClick={() => {
+                          router.push("/settings");
+                          setShowDropdown(false);
+                          setSearchQuery("");
+                        }}
+                      >
+                        <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="flex-1 truncate">{person.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{person.email}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Goals */}
+                {searchResults?.goals && searchResults.goals.length > 0 && (
+                  <div className="mt-1 border-t pt-1">
+                    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Goals
+                    </div>
+                    {searchResults.goals.map((goal: any) => (
+                      <button
+                        key={goal.id}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50"
+                        onClick={() => {
+                          router.push("/goals");
+                          setShowDropdown(false);
+                          setSearchQuery("");
+                        }}
+                      >
+                        <Target className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="flex-1 truncate">{goal.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Right side - Actions */}

@@ -11,7 +11,7 @@ export const searchRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      const [tasks, projects] = await Promise.all([
+      const [tasks, projects, people, goals] = await Promise.all([
         ctx.prisma.task.findMany({
           where: {
             workspaceId: input.workspaceId,
@@ -40,9 +40,33 @@ export const searchRouter = router({
           take: 5,
           orderBy: { updatedAt: "desc" },
         }),
+        // Search people in workspace
+        ctx.prisma.user.findMany({
+          where: {
+            workspaceMemberships: {
+              some: { workspaceId: input.workspaceId },
+            },
+            OR: [
+              { name: { contains: input.query, mode: "insensitive" } },
+              { email: { contains: input.query, mode: "insensitive" } },
+            ],
+          },
+          select: { id: true, name: true, email: true, avatarUrl: true },
+          take: 5,
+        }),
+        // Search goals
+        ctx.prisma.goal.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            name: { contains: input.query, mode: "insensitive" },
+          },
+          select: { id: true, name: true, status: true },
+          take: 5,
+          orderBy: { updatedAt: "desc" },
+        }),
       ]);
 
-      return { tasks, projects };
+      return { tasks, projects, people, goals };
     }),
 
   // Advanced search with filters

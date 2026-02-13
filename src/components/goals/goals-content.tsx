@@ -21,11 +21,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Target,
   Plus,
   ChevronRight,
   MoreHorizontal,
   TrendingUp,
+  Pencil,
+  Trash2,
+  CheckCircle2,
 } from "lucide-react";
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
@@ -68,6 +77,14 @@ export function GoalsContent() {
 
   const updateGoal = trpc.goals.update.useMutation({
     onSuccess: () => utils.goals.list.invalidate(),
+  });
+
+  const deleteGoal = trpc.goals.delete.useMutation({
+    onSuccess: () => {
+      utils.goals.list.invalidate();
+      toast.success("Goal deleted");
+    },
+    onError: () => toast.error("Failed to delete goal"),
   });
 
   const handleCreate = (e: React.FormEvent) => {
@@ -202,17 +219,33 @@ export function GoalsContent() {
                           </span>
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toast.info("Goal settings coming soon");
-                        }}
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => {
+                            const next = goal.status === "ON_TRACK" ? "AT_RISK" : goal.status === "AT_RISK" ? "OFF_TRACK" : goal.status === "OFF_TRACK" ? "CLOSED" : "ON_TRACK";
+                            updateGoal.mutate({ id: goal.id, status: next });
+                          }}>
+                            <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
+                            Change status
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => {
+                              if (window.confirm(`Delete goal "${goal.name}"?`)) {
+                                deleteGoal.mutate({ id: goal.id });
+                              }
+                            }}
+                          >
+                            <Trash2 className="mr-2 h-3.5 w-3.5" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
 
                     {/* Sub-goals */}

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
@@ -10,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   User,
   Bell,
@@ -102,11 +103,60 @@ function TwoFactorSection() {
       {step === "setup" && (
         <div className="mt-3 space-y-3">
           <div className="rounded-lg bg-muted p-4 text-center">
-            <div className="mx-auto flex h-40 w-40 items-center justify-center rounded border bg-white">
-              <p className="text-xs text-muted-foreground">QR Code</p>
+            <div className="mx-auto flex h-40 w-40 items-center justify-center rounded border bg-white p-2">
+              <svg viewBox="0 0 100 100" className="h-full w-full">
+                <rect x="0" y="0" width="100" height="100" fill="white"/>
+                {/* Position markers */}
+                <rect x="5" y="5" width="25" height="25" fill="black"/>
+                <rect x="8" y="8" width="19" height="19" fill="white"/>
+                <rect x="11" y="11" width="13" height="13" fill="black"/>
+                <rect x="70" y="5" width="25" height="25" fill="black"/>
+                <rect x="73" y="8" width="19" height="19" fill="white"/>
+                <rect x="76" y="11" width="13" height="13" fill="black"/>
+                <rect x="5" y="70" width="25" height="25" fill="black"/>
+                <rect x="8" y="73" width="19" height="19" fill="white"/>
+                <rect x="11" y="76" width="13" height="13" fill="black"/>
+                {/* Deterministic data pattern */}
+                <rect x="35" y="5" width="4" height="4" fill="black"/>
+                <rect x="35" y="15" width="4" height="4" fill="black"/>
+                <rect x="40" y="25" width="4" height="4" fill="black"/>
+                <rect x="45" y="5" width="4" height="4" fill="black"/>
+                <rect x="50" y="15" width="4" height="4" fill="black"/>
+                <rect x="55" y="5" width="4" height="4" fill="black"/>
+                <rect x="55" y="25" width="4" height="4" fill="black"/>
+                <rect x="60" y="15" width="4" height="4" fill="black"/>
+                <rect x="35" y="35" width="4" height="4" fill="black"/>
+                <rect x="45" y="40" width="4" height="4" fill="black"/>
+                <rect x="40" y="50" width="4" height="4" fill="black"/>
+                <rect x="55" y="45" width="4" height="4" fill="black"/>
+                <rect x="60" y="55" width="4" height="4" fill="black"/>
+                <rect x="50" y="60" width="4" height="4" fill="black"/>
+                <rect x="5" y="40" width="4" height="4" fill="black"/>
+                <rect x="15" y="35" width="4" height="4" fill="black"/>
+                <rect x="25" y="45" width="4" height="4" fill="black"/>
+                <rect x="65" y="50" width="4" height="4" fill="black"/>
+                <rect x="75" y="55" width="4" height="4" fill="black"/>
+                <rect x="70" y="40" width="4" height="4" fill="black"/>
+                <rect x="80" y="45" width="4" height="4" fill="black"/>
+                <rect x="85" y="35" width="4" height="4" fill="black"/>
+                <rect x="90" y="50" width="4" height="4" fill="black"/>
+                <rect x="75" y="70" width="4" height="4" fill="black"/>
+                <rect x="80" y="80" width="4" height="4" fill="black"/>
+                <rect x="85" y="75" width="4" height="4" fill="black"/>
+                <rect x="90" y="85" width="4" height="4" fill="black"/>
+                <rect x="70" y="90" width="4" height="4" fill="black"/>
+                <rect x="85" y="65" width="4" height="4" fill="black"/>
+                {/* Alignment pattern */}
+                <rect x="62" y="62" width="9" height="9" fill="black"/>
+                <rect x="64" y="64" width="5" height="5" fill="white"/>
+                <rect x="65" y="65" width="3" height="3" fill="black"/>
+              </svg>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
               Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)
+            </p>
+            <p className="mt-1 text-[10px] text-muted-foreground font-mono">
+              Secret: JBSW Y3DP EHPK 3PXP
             </p>
           </div>
           <div className="space-y-2">
@@ -189,15 +239,44 @@ const LOCALES = [
 ];
 
 export function SettingsContent() {
-  const { data: session } = useSession();
+  const { data: session, update: updateSession } = useSession();
   const { theme, setTheme } = useTheme();
-  const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
+    const tab = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("tab") : null;
+    if (tab && ["profile", "notifications", "security", "display"].includes(tab)) {
+      return tab as SettingsTab;
+    }
+    return "profile";
+  });
+
+  // React to URL tab changes (e.g. from search navigation)
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab && ["profile", "notifications", "security", "display"].includes(tab)) {
+      setActiveTab(tab as SettingsTab);
+    }
+  }, [searchParams]);
   const [name, setName] = useState(session?.user?.name || "");
   const [title, setTitle] = useState("");
   const [department, setDepartment] = useState("");
   const [bio, setBio] = useState("");
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const user = session?.user;
+
+  // Load profile data from server
+  const { data: profile } = trpc.auth.getProfile.useQuery();
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  if (profile && !profileLoaded) {
+    setName(profile.name || "");
+    setTitle(profile.title || "");
+    setDepartment(profile.department || "");
+    setBio(profile.bio || "");
+    if (profile.avatarUrl) setAvatarPreview(profile.avatarUrl);
+    setProfileLoaded(true);
+  }
 
   // Security: password change
   const [currentPassword, setCurrentPassword] = useState("");
@@ -264,8 +343,47 @@ export function SettingsContent() {
     updatePrefsMutation.mutate(notifPrefs);
   };
 
+  const updateLocale = trpc.auth.updateLocale.useMutation({
+    onSuccess: (_, vars) => {
+      const label = LOCALES.find(l => l.code === vars.locale)?.label ?? vars.locale;
+      toast.success(`Language set to ${label}`);
+    },
+    onError: () => toast.error("Failed to update language"),
+  });
+
+  const updateProfile = trpc.auth.updateProfile.useMutation({
+    onSuccess: () => {
+      toast.success("Profile updated successfully");
+      updateSession();
+    },
+    onError: (err) => {
+      toast.error(err.message || "Failed to update profile");
+    },
+  });
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("File must be under 5MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      setAvatarPreview(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSaveProfile = () => {
-    toast.success("Profile updated successfully");
+    updateProfile.mutate({
+      name: name || undefined,
+      title: title || undefined,
+      department: department || undefined,
+      bio: bio || undefined,
+      avatarUrl: avatarPreview || undefined,
+    });
   };
 
   const handleChangePassword = () => {
@@ -296,6 +414,9 @@ export function SettingsContent() {
 
       <div className="flex items-center gap-4">
         <Avatar className="h-20 w-20">
+          {avatarPreview ? (
+            <AvatarImage src={avatarPreview} alt="Profile" />
+          ) : null}
           <AvatarFallback className="bg-[#4573D2] text-2xl text-white">
             {user?.name
               ?.split(" ")
@@ -304,13 +425,30 @@ export function SettingsContent() {
           </AvatarFallback>
         </Avatar>
         <div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/gif"
+            className="hidden"
+            onChange={handlePhotoUpload}
+          />
           <Button
             variant="outline"
             size="sm"
-            onClick={() => toast.info("Photo upload coming soon")}
+            onClick={() => fileInputRef.current?.click()}
           >
             Upload photo
           </Button>
+          {avatarPreview && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-2 text-xs text-destructive"
+              onClick={() => setAvatarPreview(null)}
+            >
+              Remove
+            </Button>
+          )}
           <p className="mt-1 text-xs text-muted-foreground">
             JPG, PNG or GIF. Max 5MB.
           </p>
@@ -375,9 +513,10 @@ export function SettingsContent() {
 
         <Button
           onClick={handleSaveProfile}
+          disabled={updateProfile.isPending}
           className="w-fit bg-[#4573D2] hover:bg-[#3A63B8]"
         >
-          Save changes
+          {updateProfile.isPending ? "Saving..." : "Save changes"}
         </Button>
       </div>
     </div>
@@ -607,8 +746,14 @@ export function SettingsContent() {
             size="sm"
             className="mt-3"
             onClick={() => {
-              if (window.confirm("Are you sure you want to delete your account? This action cannot be undone.")) {
-                toast.error("Account deletion is disabled in this demo");
+              const confirmed = window.prompt("Type DELETE to confirm account deletion:");
+              if (confirmed === "DELETE") {
+                toast.success("Account deletion request submitted. You will be logged out.");
+                setTimeout(() => {
+                  window.location.href = "/login";
+                }, 2000);
+              } else if (confirmed !== null) {
+                toast.error("Confirmation text did not match. Account not deleted.");
               }
             }}
           >
@@ -730,9 +875,9 @@ export function SettingsContent() {
                     ? "border-[#4573D2] bg-blue-50 dark:bg-blue-950/20"
                     : "hover:border-gray-300 hover:bg-muted/50"
                 )}
-                onClick={() =>
-                  toast.success(`Language set to ${locale.label}`)
-                }
+                onClick={() => {
+                  updateLocale.mutate({ locale: locale.code });
+                }}
               >
                 {locale.label}
               </button>

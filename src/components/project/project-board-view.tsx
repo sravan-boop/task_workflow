@@ -14,7 +14,15 @@ import {
   Circle,
   Calendar,
   GripVertical,
+  Pencil,
+  Trash2,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Card } from "@/components/ui/card";
 import {
   DndContext,
@@ -202,6 +210,21 @@ export function ProjectBoardView({
     onSuccess: () => utils.tasks.list.invalidate({ projectId }),
   });
 
+  const renameSection = trpc.sections.update.useMutation({
+    onSuccess: () => {
+      utils.sections.list.invalidate({ projectId });
+      toast.success("Section renamed");
+    },
+  });
+
+  const deleteSection = trpc.sections.delete.useMutation({
+    onSuccess: () => {
+      utils.sections.list.invalidate({ projectId });
+      utils.tasks.list.invalidate({ projectId });
+      toast.success("Section deleted");
+    },
+  });
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor)
@@ -297,14 +320,35 @@ export function ProjectBoardView({
                     {sectionTasks.length}
                   </span>
                 </h3>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => toast.info("Section settings coming soon")}
-                >
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-6 w-6">
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => {
+                      const newName = window.prompt("Rename section:", section.name);
+                      if (newName && newName.trim()) {
+                        renameSection.mutate({ id: section.id, name: newName.trim() });
+                      }
+                    }}>
+                      <Pencil className="mr-2 h-3.5 w-3.5" />
+                      Rename
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-destructive"
+                      onClick={() => {
+                        if (window.confirm(`Delete section "${section.name}"? Tasks will be moved to the first section.`)) {
+                          deleteSection.mutate({ id: section.id });
+                        }
+                      }}
+                    >
+                      <Trash2 className="mr-2 h-3.5 w-3.5" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
 
               {/* Task Cards */}

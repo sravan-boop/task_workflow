@@ -41,4 +41,16 @@ export const recentsRouter = router({
         take: input.limit,
       });
     }),
+
+  remove: protectedProcedure
+    .input(z.object({ resourceType: z.string(), resourceId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.prisma.visitHistory.deleteMany({
+        where: {
+          userId: ctx.session.user.id,
+          resourceType: input.resourceType,
+          resourceId: input.resourceId,
+        },
+      });
+    }),
 });

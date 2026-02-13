@@ -1,24 +1,33 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Sparkles, Send, Bot, User, Loader2 } from "lucide-react";
+import {
+  Sparkles,
+  Send,
+  Bot,
+  User,
+  Loader2,
+  Trash2,
+  ArrowRight,
+} from "lucide-react";
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  actions?: Array<{ label: string; href: string; type: string }>;
 }
 
 interface AiChatPanelProps {
@@ -27,18 +36,73 @@ interface AiChatPanelProps {
   projectId?: string;
 }
 
+const STORAGE_KEY = "taskflow-ai-chat-history";
+
 const WELCOME_MESSAGE: Message = {
   id: "welcome",
   role: "assistant",
   content:
-    "Hi! I'm TaskFlow AI, your project management assistant. I can help you with:\n\n- Summarizing tasks and projects\n- Prioritizing your work\n- Breaking down complex tasks\n- Project management advice\n\nHow can I help you today?",
+    "Hi! I'm TaskFlow AI, your intelligent project management assistant. I can help you with:\n\n- **Finding your priority tasks** ordered by deadline\n- **Navigating TaskFlow** — just ask where anything is\n- **Site guidance** — settings, dark mode, 2FA, notifications, etc.\n- **Project management advice** and task breakdowns\n\nI remember our conversation, so feel free to ask follow-up questions!",
   timestamp: new Date(0),
+  actions: [],
 };
 
-export function AiChatPanel({ open, onOpenChange, projectId }: AiChatPanelProps) {
+function loadChatHistory(): Message[] {
+  if (typeof window === "undefined") return [WELCOME_MESSAGE];
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved) as Message[];
+      if (parsed.length > 0) {
+        return parsed.map((m) => ({ ...m, timestamp: new Date(m.timestamp) }));
+      }
+    }
+  } catch {}
+  return [WELCOME_MESSAGE];
+}
+
+function saveChatHistory(messages: Message[]) {
+  try {
+    // Keep last 100 messages to avoid localStorage bloat
+    const toSave = messages.slice(-100);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  } catch {}
+}
+
+// Simple markdown-like rendering for bold and bullets
+function renderMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n- /g, '\n• ')
+    .replace(/\n(\d+)\. /g, '\n$1. ');
+}
+
+export function AiChatPanel({
+  open,
+  onOpenChange,
+  projectId,
+}: AiChatPanelProps) {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Load chat history from localStorage after mount
+  useEffect(() => {
+    setMounted(true);
+    const history = loadChatHistory();
+    setMessages(history);
+    setLoaded(true);
+  }, []);
+
+  // Save whenever messages change (after initial load)
+  useEffect(() => {
+    if (loaded && messages.length > 0) {
+      saveChatHistory(messages);
+    }
+  }, [messages, loaded]);
 
   const chat = trpc.ai.chat.useMutation({
     onSuccess: (data) => {
@@ -49,6 +113,7 @@ export function AiChatPanel({ open, onOpenChange, projectId }: AiChatPanelProps)
           role: "assistant",
           content: data.response,
           timestamp: new Date(),
+          actions: data.actions || [],
         },
       ]);
     },
@@ -60,6 +125,7 @@ export function AiChatPanel({ open, onOpenChange, projectId }: AiChatPanelProps)
           role: "assistant",
           content: `Sorry, I encountered an error: ${error.message}`,
           timestamp: new Date(),
+          actions: [],
         },
       ]);
     },
@@ -71,7 +137,7 @@ export function AiChatPanel({ open, onOpenChange, projectId }: AiChatPanelProps)
     }
   }, [messages]);
 
-  const handleSend = () => {
+  const handleSend = useCallback(() => {
     if (!input.trim() || chat.isPending) return;
 
     const userMessage: Message = {
@@ -81,36 +147,74 @@ export function AiChatPanel({ open, onOpenChange, projectId }: AiChatPanelProps)
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInput("");
+
+    // Build history for the API (exclude welcome message)
+    const history = updatedMessages
+      .filter((m) => m.id !== "welcome")
+      .slice(-20)
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    // Remove the last message (current one) from history since it's sent as 'message'
+    history.pop();
 
     chat.mutate({
       message: input.trim(),
+      history: history.length > 0 ? history : undefined,
       context: projectId ? { projectId } : undefined,
     });
+  }, [input, chat, messages, projectId]);
+
+  const clearChat = () => {
+    setMessages([WELCOME_MESSAGE]);
+    localStorage.removeItem(STORAGE_KEY);
+  };
+
+  const handleNavigate = (href: string) => {
+    router.push(href);
+    onOpenChange(false);
   };
 
   const suggestedQuestions = [
-    "What should I work on today?",
-    "How can I improve team velocity?",
-    "Help me break down a complex task",
-    "Tips for managing project deadlines",
+    "What are my priority tasks?",
+    "How do I enable dark mode?",
+    "Show me my overdue tasks",
+    "How do I set up 2FA?",
+    "Where can I change my profile picture?",
+    "Guide me through TaskFlow features",
   ];
+
+  if (!mounted) return null;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-[420px] flex-col p-0 sm:max-w-[420px]">
-        <SheetHeader className="border-b px-4 py-3">
-          <SheetTitle className="flex items-center gap-2 text-base">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-[#4573D2] to-[#AA62E3]">
-              <Sparkles className="h-4 w-4 text-white" />
-            </div>
-            TaskFlow AI
-          </SheetTitle>
+      <SheetContent className="flex w-[440px] flex-col p-0 sm:max-w-[440px]">
+        <SheetHeader className="border-b px-4 py-3 pr-12">
+          <div className="flex items-center gap-2">
+            <SheetTitle className="flex flex-1 items-center gap-2 text-base">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-[#4573D2] to-[#AA62E3]">
+                <Sparkles className="h-4 w-4 text-white" />
+              </div>
+              TaskFlow AI
+            </SheetTitle>
+            {messages.length > 1 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                onClick={clearChat}
+                title="Clear chat history"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
         </SheetHeader>
 
         {/* Messages */}
-        <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4" ref={scrollRef}>
           <div className="space-y-4">
             {messages.map((message) => (
               <div
@@ -125,15 +229,38 @@ export function AiChatPanel({ open, onOpenChange, projectId }: AiChatPanelProps)
                     <Bot className="h-3.5 w-3.5 text-white" />
                   </div>
                 )}
-                <div
-                  className={cn(
-                    "max-w-[85%] rounded-xl px-3 py-2 text-sm",
-                    message.role === "user"
-                      ? "bg-[#4573D2] text-white"
-                      : "bg-muted"
+                <div className="max-w-[85%] space-y-2">
+                  <div
+                    className={cn(
+                      "rounded-xl px-3 py-2 text-sm",
+                      message.role === "user"
+                        ? "bg-[#4573D2] text-white"
+                        : "bg-muted"
+                    )}
+                  >
+                    <div
+                      className="whitespace-pre-wrap [&_strong]:font-semibold"
+                      dangerouslySetInnerHTML={{
+                        __html: renderMarkdown(message.content),
+                      }}
+                    />
+                  </div>
+
+                  {/* Navigation action buttons */}
+                  {message.actions && message.actions.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {message.actions.map((action, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => handleNavigate(action.href)}
+                          className="inline-flex items-center gap-1 rounded-md border bg-white px-2.5 py-1 text-xs font-medium text-[#4573D2] shadow-sm transition-colors hover:bg-[#4573D2] hover:text-white dark:bg-card"
+                        >
+                          <ArrowRight className="h-3 w-3" />
+                          {action.label}
+                        </button>
+                      ))}
+                    </div>
                   )}
-                >
-                  <p className="whitespace-pre-wrap">{message.content}</p>
                 </div>
                 {message.role === "user" && (
                   <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[#1e1f21]">
@@ -148,7 +275,12 @@ export function AiChatPanel({ open, onOpenChange, projectId }: AiChatPanelProps)
                   <Bot className="h-3.5 w-3.5 text-white" />
                 </div>
                 <div className="rounded-xl bg-muted px-3 py-2">
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">
+                      Thinking...
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
@@ -166,14 +298,14 @@ export function AiChatPanel({ open, onOpenChange, projectId }: AiChatPanelProps)
                   onClick={() => {
                     setInput(q);
                   }}
-                  className="block w-full rounded-lg border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/50"
+                  className="block w-full rounded-lg border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
                 >
                   {q}
                 </button>
               ))}
             </div>
           )}
-        </ScrollArea>
+        </div>
 
         {/* Input */}
         <div className="border-t px-4 py-3">
@@ -187,7 +319,7 @@ export function AiChatPanel({ open, onOpenChange, projectId }: AiChatPanelProps)
                   handleSend();
                 }
               }}
-              placeholder="Ask TaskFlow AI..."
+              placeholder="Ask TaskFlow AI anything..."
               className="text-sm"
               disabled={chat.isPending}
             />
@@ -201,7 +333,7 @@ export function AiChatPanel({ open, onOpenChange, projectId }: AiChatPanelProps)
             </Button>
           </div>
           <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
-            Powered by Claude AI
+            Powered by OpenAI GPT-4o &middot; Chat history is saved locally
           </p>
         </div>
       </SheetContent>

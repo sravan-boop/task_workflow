@@ -46,3 +46,4 @@ e2e-puppeteer/screenshots/
 # prisma
 prisma/*.db
 prisma/generated
+ssh-key-2026-01-26.key

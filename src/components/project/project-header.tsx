@@ -24,6 +24,7 @@ import {
   CopyPlus,
   Download,
   Printer,
+  Trash2,
   Filter,
   ArrowUpDown,
   Palette,
@@ -99,6 +100,22 @@ export function ProjectHeader({
       utils.projects.list.invalidate();
       toast.success(project.isArchived ? "Project unarchived" : "Project archived");
     },
+  });
+
+  const removeRecent = trpc.recents.remove.useMutation();
+
+  const deleteProject = trpc.projects.delete.useMutation({
+    onSuccess: () => {
+      utils.projects.list.invalidate();
+      // Clean up the project from Recents sidebar
+      removeRecent.mutate(
+        { resourceType: "project", resourceId: project.id },
+        { onSettled: () => utils.recents.list.invalidate() }
+      );
+      toast.success("Project deleted");
+      router.push("/home");
+    },
+    onError: () => toast.error("Failed to delete project"),
   });
 
   const duplicateProject = trpc.projects.duplicate.useMutation({
@@ -259,6 +276,17 @@ export function ProjectHeader({
                 >
                   <CopyPlus className="mr-2 h-4 w-4" />
                   Duplicate project
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => {
+                    if (window.confirm(`Delete project "${project.name}"? This will permanently remove all tasks, sections, and data in this project.`)) {
+                      deleteProject.mutate({ id: project.id });
+                    }
+                  }}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete project
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleExportCsv}>

@@ -346,6 +346,9 @@ export const authRouter = router({
         name: true,
         email: true,
         avatarUrl: true,
+        title: true,
+        department: true,
+        bio: true,
         locale: true,
         doNotDisturb: true,
         dndUntil: true,
@@ -353,4 +356,27 @@ export const authRouter = router({
       },
     });
   }),
+
+  updateProfile: protectedProcedure
+    .input(
+      z.object({
+        name: z.string().min(1).max(100).optional(),
+        title: z.string().max(100).optional(),
+        department: z.string().max(100).optional(),
+        bio: z.string().max(500).optional(),
+        avatarUrl: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.prisma.user.update({
+        where: { id: ctx.session.user.id },
+        data: {
+          ...(input.name !== undefined && { name: input.name }),
+          ...(input.title !== undefined && { title: input.title }),
+          ...(input.department !== undefined && { department: input.department }),
+          ...(input.bio !== undefined && { bio: input.bio }),
+          ...(input.avatarUrl !== undefined && { avatarUrl: input.avatarUrl }),
+        },
+      });
+    }),
 });

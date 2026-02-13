@@ -15,11 +15,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Briefcase,
   ChevronRight,
   Plus,
   MoreHorizontal,
   FolderOpen,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -64,6 +72,14 @@ export function PortfoliosContent() {
     },
   });
 
+  const deletePortfolio = trpc.portfolios.delete.useMutation({
+    onSuccess: () => {
+      utils.portfolios.list.invalidate();
+      toast.success("Portfolio deleted");
+    },
+    onError: () => toast.error("Failed to delete portfolio"),
+  });
+
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !workspaceId) return;
@@ -106,17 +122,30 @@ export function PortfoliosContent() {
                         {portfolio.projects.length !== 1 ? "s" : ""}
                       </p>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toast.info("Portfolio settings coming soon");
-                      }}
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => toast.info(`Rename: ${portfolio.name}`)}>
+                          <Pencil className="mr-2 h-3.5 w-3.5" />
+                          Rename
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-destructive"
+                          onClick={() => {
+                            if (window.confirm(`Delete portfolio "${portfolio.name}"?`)) {
+                              deletePortfolio.mutate({ id: portfolio.id });
+                            }
+                          }}
+                        >
+                          <Trash2 className="mr-2 h-3.5 w-3.5" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
 
                   {portfolio.projects.length > 0 ? (
