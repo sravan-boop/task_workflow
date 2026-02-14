@@ -26,6 +26,27 @@ export const projectsRouter = router({
       });
     }),
 
+  listAll: protectedProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      return ctx.prisma.project.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+        },
+        include: {
+          team: true,
+          _count: {
+            select: { taskProjects: true, sections: true },
+          },
+        },
+        orderBy: { updatedAt: "desc" },
+      });
+    }),
+
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -114,6 +135,10 @@ export const projectsRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      // Also remove from visit history so recents update
+      await ctx.prisma.visitHistory.deleteMany({
+        where: { resourceType: "project", resourceId: input.id },
+      });
       return ctx.prisma.project.delete({
         where: { id: input.id },
       });

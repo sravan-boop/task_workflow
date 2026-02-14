@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { useBulkSelection } from "@/contexts/bulk-selection-context";
@@ -8,6 +8,7 @@ import { useUndo } from "@/contexts/undo-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { toast } from "sonner";
 import {
   Plus,
   ChevronRight,
@@ -15,6 +16,12 @@ import {
   Circle,
   GripVertical,
   Calendar,
+  ExternalLink,
+  Copy,
+  CopyPlus,
+  CalendarDays,
+  Trash2,
+  FolderPlus,
 } from "lucide-react";
 import { BulkActionsToolbar } from "@/components/task/bulk-actions-toolbar";
 
@@ -45,10 +52,13 @@ export function ProjectListView({
     null
   );
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; taskId: string } | null>(null);
+  const contextRef = useRef<HTMLDivElement>(null);
 
   const createTask = trpc.tasks.create.useMutation({
     onSuccess: () => {
       utils.tasks.list.invalidate({ projectId });
+      utils.tasks.myTasks.invalidate();
       setNewTaskTitle("");
       setAddingTaskInSection(null);
     },
@@ -57,6 +67,7 @@ export function ProjectListView({
   const completeTask = trpc.tasks.complete.useMutation({
     onSuccess: (_data, variables) => {
       utils.tasks.list.invalidate({ projectId });
+      utils.tasks.myTasks.invalidate();
       pushUndo("Task completed", () => {
         uncompleteTask.mutate({ id: variables.id });
       });
@@ -66,8 +77,37 @@ export function ProjectListView({
   const uncompleteTask = trpc.tasks.uncomplete.useMutation({
     onSuccess: () => {
       utils.tasks.list.invalidate({ projectId });
+      utils.tasks.myTasks.invalidate();
     },
   });
+
+  const deleteTask = trpc.tasks.delete.useMutation({
+    onSuccess: () => {
+      utils.tasks.list.invalidate({ projectId });
+      utils.tasks.myTasks.invalidate();
+      toast.success("Task deleted");
+    },
+  });
+
+  const duplicateTask = trpc.tasks.duplicate.useMutation({
+    onSuccess: () => {
+      utils.tasks.list.invalidate({ projectId });
+      toast.success("Task duplicated");
+    },
+  });
+
+  // Close context menu on outside click
+  useEffect(() => {
+    const handler = () => setContextMenu(null);
+    if (contextMenu) {
+      document.addEventListener("click", handler);
+      document.addEventListener("contextmenu", handler);
+      return () => {
+        document.removeEventListener("click", handler);
+        document.removeEventListener("contextmenu", handler);
+      };
+    }
+  }, [contextMenu]);
 
   // Initialize all sections as expanded
   if (sections && expandedSections.size === 0) {
@@ -172,6 +212,7 @@ export function ProjectListView({
         <div className="flex-1">Task name</div>
         <div className="w-32 text-center">Assignee</div>
         <div className="w-32 text-center">Due date</div>
+        <div className="w-24 text-center">Status</div>
       </div>
 
       {sections?.map((section) => (
@@ -199,6 +240,10 @@ export function ProjectListView({
                     "group flex items-center border-b border-gray-100 py-1.5 hover:bg-[#f9f8f8]",
                     isSelected(task.id) && "bg-blue-50 hover:bg-blue-50"
                   )}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenu({ x: e.clientX, y: e.clientY, taskId: task.id });
+                  }}
                 >
                   {/* Bulk selection checkbox */}
                   <div className="flex w-6 items-center justify-center">
@@ -257,6 +302,18 @@ export function ProjectListView({
                       </span>
                     )}
                   </div>
+                  <div className="flex w-24 items-center justify-center">
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                        task.status === "COMPLETE"
+                          ? "bg-green-100 text-green-700"
+                          : "bg-gray-100 text-gray-600"
+                      )}
+                    >
+                      {task.status === "COMPLETE" ? "Complete" : "Incomplete"}
+                    </span>
+                  </div>
                 </div>
               ))}
 
@@ -308,6 +365,57 @@ export function ProjectListView({
         projectId={projectId}
         sections={sections?.map((s) => ({ id: s.id, name: s.name }))}
       />
+
+      {/* Right-click Context Menu */}
+      {contextMenu && (
+        <div
+          ref={contextRef}
+          className="fixed z-50 min-w-[180px] rounded-md border bg-white py-1 shadow-lg"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => { onTaskClick(contextMenu.taskId); setContextMenu(null); }}
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> Open task
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => { duplicateTask.mutate({ id: contextMenu.taskId }); setContextMenu(null); }}
+          >
+            <CopyPlus className="h-3.5 w-3.5" /> Duplicate
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              navigator.clipboard.writeText(`${window.location.origin}/my-tasks?task=${contextMenu.taskId}`);
+              toast.success("Link copied");
+              setContextMenu(null);
+            }}
+          >
+            <Copy className="h-3.5 w-3.5" /> Copy link
+          </button>
+          <div className="my-1 border-t" />
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              const task = tasks?.find((t) => t.id === contextMenu.taskId);
+              handleToggleComplete(contextMenu.taskId, task?.status ?? "INCOMPLETE");
+              setContextMenu(null);
+            }}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {tasks?.find((t) => t.id === contextMenu.taskId)?.status === "COMPLETE" ? "Mark incomplete" : "Mark complete"}
+          </button>
+          <div className="my-1 border-t" />
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-destructive hover:bg-muted/50"
+            onClick={() => { deleteTask.mutate({ id: contextMenu.taskId }); setContextMenu(null); }}
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </button>
+        </div>
+      )}
     </div>
   );
 }

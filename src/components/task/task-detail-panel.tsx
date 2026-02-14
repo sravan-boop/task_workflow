@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { toast } from "sonner";
 import {
   X,
@@ -30,6 +35,8 @@ import {
   Hash,
   Pencil,
   Clock,
+  Plus,
+  FolderPlus,
 } from "lucide-react";
 import { AiTaskSummary } from "@/components/ai/ai-task-summary";
 import { RichTextEditor } from "@/components/editor/rich-text-editor";
@@ -59,10 +66,26 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const [proofingAttachment, setProofingAttachment] = useState<{ id: string; url: string; name: string } | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoDuration, setVideoDuration] = useState<number>(0);
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const [projectSearch, setProjectSearch] = useState("");
+
+  // Queries for editable fields
+  const { data: workspaces } = trpc.workspaces.list.useQuery();
+  const workspaceId = workspaces?.[0]?.id;
+  const { data: members } = trpc.workspaces.getMembers.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
+  const { data: allProjects } = trpc.projects.list.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
 
   const updateTask = trpc.tasks.update.useMutation({
     onSuccess: () => {
       utils.tasks.get.invalidate({ id: taskId });
+      utils.tasks.list.invalidate();
+      utils.tasks.myTasks.invalidate();
     },
   });
 
@@ -165,6 +188,16 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const removeDependency = trpc.tasks.removeDependency.useMutation({
     onSuccess: () => {
       utils.tasks.get.invalidate({ id: taskId });
+    },
+  });
+
+  const addToProject = trpc.tasks.addToProject.useMutation({
+    onSuccess: () => {
+      utils.tasks.get.invalidate({ id: taskId });
+      utils.tasks.list.invalidate();
+      setAddProjectOpen(false);
+      setProjectSearch("");
+      toast.success("Added to project");
     },
   });
 
@@ -439,25 +472,55 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
               <User className="h-4 w-4" />
               Assignee
             </div>
-            <div className="flex items-center gap-2">
-              {task.assignee ? (
-                <>
-                  <Avatar className="h-6 w-6">
-                    <AvatarFallback className="bg-[#4573D2] text-[10px] text-white">
-                      {task.assignee.name
-                        ?.split(" ")
-                        .map((n) => n[0])
-                        .join("")}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="text-sm">{task.assignee.name}</span>
-                </>
-              ) : (
-                <span className="text-sm text-muted-foreground">
-                  No assignee
-                </span>
-              )}
-            </div>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button className="flex items-center gap-2 rounded px-2 py-1 hover:bg-muted/50">
+                  {task.assignee ? (
+                    <>
+                      <Avatar className="h-6 w-6">
+                        <AvatarFallback className="bg-[#4573D2] text-[10px] text-white">
+                          {task.assignee.name
+                            ?.split(" ")
+                            .map((n) => n[0])
+                            .join("")}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="text-sm">{task.assignee.name}</span>
+                    </>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      No assignee
+                    </span>
+                  )}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 p-1" align="start">
+                <button
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
+                  onClick={() => updateTask.mutate({ id: taskId, assigneeId: null })}
+                >
+                  <User className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Unassigned</span>
+                </button>
+                {members?.map((m) => (
+                  <button
+                    key={m.user.id}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50",
+                      task.assigneeId === m.user.id && "bg-muted"
+                    )}
+                    onClick={() => updateTask.mutate({ id: taskId, assigneeId: m.user.id })}
+                  >
+                    <Avatar className="h-5 w-5">
+                      <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
+                        {m.user.name?.split(" ").map((n) => n[0]).join("")}
+                      </AvatarFallback>
+                    </Avatar>
+                    {m.user.name}
+                  </button>
+                ))}
+              </PopoverContent>
+            </Popover>
           </div>
 
           {/* Due Date */}
@@ -466,19 +529,27 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
               <CalendarDays className="h-4 w-4" />
               Due date
             </div>
-            <div>
-              {task.dueDate ? (
-                <span className="text-sm">
-                  {new Date(task.dueDate).toLocaleDateString("en-US", {
-                    weekday: "short",
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </span>
-              ) : (
-                <span className="text-sm text-muted-foreground">
-                  No due date
-                </span>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                className="rounded border border-transparent bg-transparent px-2 py-1 text-sm hover:border-gray-200 focus:border-[#4573D2] focus:outline-none"
+                value={task.dueDate ? new Date(task.dueDate).toISOString().split("T")[0] : ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  updateTask.mutate({
+                    id: taskId,
+                    dueDate: val ? new Date(val + "T00:00:00.000Z").toISOString() : null,
+                  });
+                }}
+              />
+              {task.dueDate && (
+                <button
+                  onClick={() => updateTask.mutate({ id: taskId, dueDate: null })}
+                  className="text-muted-foreground hover:text-destructive"
+                  title="Clear due date"
+                >
+                  <X className="h-3 w-3" />
+                </button>
               )}
             </div>
           </div>
@@ -511,7 +582,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
               <ArrowRight className="h-4 w-4" />
               Projects
             </div>
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap items-center gap-1">
               {task.taskProjects?.map((tp) => (
                 <span
                   key={tp.id}
@@ -520,6 +591,55 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                   {tp.project.name}
                 </span>
               ))}
+              <Popover open={addProjectOpen} onOpenChange={setAddProjectOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-muted"
+                    title="Add to project"
+                  >
+                    <Plus className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-60 p-2" align="start">
+                  <Input
+                    value={projectSearch}
+                    onChange={(e) => setProjectSearch(e.target.value)}
+                    placeholder="Search projects..."
+                    className="mb-2 h-7 text-sm"
+                    autoFocus
+                  />
+                  <div className="max-h-40 overflow-y-auto">
+                    {allProjects
+                      ?.filter(
+                        (p) =>
+                          p.name.toLowerCase().includes(projectSearch.toLowerCase()) &&
+                          !task.taskProjects?.some((tp) => tp.project.id === p.id)
+                      )
+                      .map((p) => (
+                        <button
+                          key={p.id}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
+                          onClick={() => addToProject.mutate({ taskId, projectId: p.id })}
+                        >
+                          <div
+                            className="h-2.5 w-2.5 rounded-sm"
+                            style={{ backgroundColor: p.color }}
+                          />
+                          {p.name}
+                        </button>
+                      ))}
+                    {allProjects?.filter(
+                      (p) =>
+                        p.name.toLowerCase().includes(projectSearch.toLowerCase()) &&
+                        !task.taskProjects?.some((tp) => tp.project.id === p.id)
+                    ).length === 0 && (
+                      <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                        No projects available
+                      </p>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 

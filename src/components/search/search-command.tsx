@@ -25,6 +25,7 @@ import {
   Search,
   CircleDot,
   User,
+  Archive,
 } from "lucide-react";
 
 const navigationItems = [
@@ -34,6 +35,7 @@ const navigationItems = [
   { label: "Reporting", href: "/reporting", icon: BarChart3 },
   { label: "Portfolios", href: "/portfolios", icon: Briefcase },
   { label: "Goals", href: "/goals", icon: Target },
+  { label: "Archived Projects", href: "/search?filter=archived", icon: Archive },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 

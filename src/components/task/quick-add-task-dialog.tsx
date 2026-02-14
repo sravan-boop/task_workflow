@@ -12,12 +12,17 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import { FolderKanban, User } from "lucide-react";
+
+type TaskMode = "project" | "standalone";
 
 export function QuickAddTaskDialog() {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [taskMode, setTaskMode] = useState<TaskMode>("project");
 
   const { data: workspaces } = trpc.workspaces.list.useQuery();
   const workspaceId = workspaces?.[0]?.id;
@@ -75,13 +80,26 @@ export function QuickAddTaskDialog() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !selectedProjectId) return;
+    if (!title.trim()) return;
 
-    createTask.mutate({
-      title: title.trim(),
-      projectId: selectedProjectId,
-      dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
-    });
+    if (taskMode === "project") {
+      if (!selectedProjectId) {
+        toast.error("Please select a project");
+        return;
+      }
+      createTask.mutate({
+        title: title.trim(),
+        projectId: selectedProjectId,
+        dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+      });
+    } else {
+      // Standalone task - no project
+      createTask.mutate({
+        title: title.trim(),
+        workspaceId,
+        dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+      });
+    }
   };
 
   return (
@@ -90,6 +108,37 @@ export function QuickAddTaskDialog() {
         <DialogHeader>
           <DialogTitle>Quick Add Task</DialogTitle>
         </DialogHeader>
+
+        {/* Task Mode Toggle */}
+        <div className="flex gap-2 rounded-lg border p-1">
+          <button
+            type="button"
+            onClick={() => setTaskMode("project")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              taskMode === "project"
+                ? "bg-[#4573D2] text-white"
+                : "text-muted-foreground hover:bg-muted"
+            )}
+          >
+            <FolderKanban className="h-4 w-4" />
+            Under a Project
+          </button>
+          <button
+            type="button"
+            onClick={() => setTaskMode("standalone")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              taskMode === "standalone"
+                ? "bg-[#4573D2] text-white"
+                : "text-muted-foreground hover:bg-muted"
+            )}
+          >
+            <User className="h-4 w-4" />
+            Standalone Task
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <Label htmlFor="task-title">Task name</Label>
@@ -102,21 +151,31 @@ export function QuickAddTaskDialog() {
             />
           </div>
 
-          <div>
-            <Label htmlFor="task-project">Project</Label>
-            <select
-              id="task-project"
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs"
-            >
-              {projects?.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {taskMode === "project" && (
+            <div>
+              <Label htmlFor="task-project">Project</Label>
+              <select
+                id="task-project"
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs"
+              >
+                {projects?.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {taskMode === "standalone" && (
+            <div className="rounded-lg border border-dashed bg-muted/30 p-3">
+              <p className="text-xs text-muted-foreground">
+                This task will be created without a project and will appear in your <strong>My Tasks</strong> section.
+              </p>
+            </div>
+          )}
 
           <div>
             <Label htmlFor="task-due">Due date</Label>

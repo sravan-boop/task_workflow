@@ -51,4 +51,52 @@ export const teamsRouter = router({
         },
       });
     }),
+
+  addMember: protectedProcedure
+    .input(
+      z.object({
+        teamId: z.string(),
+        email: z.string().email(),
+        role: z.enum(["LEAD", "MEMBER"]).default("MEMBER"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const user = await ctx.prisma.user.findUnique({
+        where: { email: input.email },
+      });
+      if (!user) {
+        throw new Error("User not found. They must register first.");
+      }
+      // Check if already a member
+      const existing = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: input.teamId, userId: user.id } },
+      });
+      if (existing) {
+        throw new Error("User is already a member of this team.");
+      }
+      return ctx.prisma.teamMember.create({
+        data: {
+          teamId: input.teamId,
+          userId: user.id,
+          role: input.role,
+        },
+        include: { user: true },
+      });
+    }),
+
+  removeMember: protectedProcedure
+    .input(
+      z.object({
+        teamId: z.string(),
+        userId: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.prisma.teamMember.deleteMany({
+        where: {
+          teamId: input.teamId,
+          userId: input.userId,
+        },
+      });
+    }),
 });

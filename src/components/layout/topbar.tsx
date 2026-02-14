@@ -65,6 +65,7 @@ export function Topbar() {
     { label: "Settings", href: "/settings", icon: "⚙️", keywords: "settings preferences configuration" },
     { label: "Admin Console", href: "/admin", icon: "🛡️", keywords: "admin console workspace management" },
     { label: "Integrations", href: "/integrations", icon: "🔌", keywords: "integrations slack github jira figma zapier google drive" },
+    { label: "Archived Projects", href: "/search?filter=archived", icon: "📦", keywords: "archive archived projects hidden inactive" },
     // Settings sub-sections
     { label: "Profile Settings", href: "/settings?tab=profile", icon: "👤", keywords: "profile name email job title department bio about me" },
     { label: "Profile Picture", href: "/settings?tab=profile", icon: "📷", keywords: "profile picture avatar photo upload image" },

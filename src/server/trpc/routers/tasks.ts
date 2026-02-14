@@ -133,7 +133,10 @@ export const tasksRouter = router({
     .query(async ({ ctx, input }) => {
       return ctx.prisma.task.findMany({
         where: {
-          assigneeId: ctx.session.user.id,
+          OR: [
+            { assigneeId: ctx.session.user.id },
+            { createdById: ctx.session.user.id },
+          ],
           workspaceId: input.workspaceId,
           ...(input.status && { status: input.status }),
           parentTaskId: null,
@@ -159,7 +162,7 @@ export const tasksRouter = router({
         assigneeId: z.string().optional(),
         dueDate: z.string().datetime().optional(),
         startDate: z.string().datetime().optional(),
-        projectId: z.string(),
+        projectId: z.string().optional(),
         sectionId: z.string().optional(),
         parentTaskId: z.string().optional(),
         workspaceId: z.string().optional(),
@@ -168,42 +171,56 @@ export const tasksRouter = router({
     .mutation(async ({ ctx, input }) => {
       // Resolve workspaceId from project if not provided
       let workspaceId = input.workspaceId;
-      if (!workspaceId) {
+      if (!workspaceId && input.projectId) {
         const project = await ctx.prisma.project.findUniqueOrThrow({
           where: { id: input.projectId },
           select: { workspaceId: true },
         });
         workspaceId = project.workspaceId;
       }
+      if (!workspaceId) {
+        // Fallback: get user's first workspace
+        const membership = await ctx.prisma.workspaceMember.findFirst({
+          where: { userId: ctx.session.user.id },
+          select: { workspaceId: true },
+        });
+        workspaceId = membership?.workspaceId;
+      }
+      if (!workspaceId) {
+        throw new Error("No workspace found");
+      }
 
-      // Get position for new task in section
-      const lastTaskProject = await ctx.prisma.taskProject.findFirst({
-        where: {
-          projectId: input.projectId,
-          sectionId: input.sectionId,
-        },
-        orderBy: { position: "desc" },
-      });
-
-      const position = (lastTaskProject?.position ?? 0) + 1;
+      // Build task project link only if projectId provided
+      const taskProjectData = input.projectId
+        ? {
+            create: {
+              projectId: input.projectId,
+              sectionId: input.sectionId,
+              position: await (async () => {
+                const lastTaskProject = await ctx.prisma.taskProject.findFirst({
+                  where: {
+                    projectId: input.projectId!,
+                    sectionId: input.sectionId,
+                  },
+                  orderBy: { position: "desc" },
+                });
+                return (lastTaskProject?.position ?? 0) + 1;
+              })(),
+            },
+          }
+        : undefined;
 
       const task = await ctx.prisma.task.create({
         data: {
           title: input.title,
           description: input.description,
-          assigneeId: input.assigneeId,
+          assigneeId: input.assigneeId || ctx.session.user.id,
           dueDate: input.dueDate ? new Date(input.dueDate) : undefined,
           startDate: input.startDate ? new Date(input.startDate) : undefined,
           parentTaskId: input.parentTaskId,
           workspaceId,
           createdById: ctx.session.user.id,
-          taskProjects: {
-            create: {
-              projectId: input.projectId,
-              sectionId: input.sectionId,
-              position,
-            },
-          },
+          ...(taskProjectData && { taskProjects: taskProjectData }),
           followers: {
             create: { userId: ctx.session.user.id },
           },
@@ -216,12 +233,14 @@ export const tasksRouter = router({
         },
       });
 
-      // Execute rules for TASK_ADDED
-      executeRules(ctx.prisma, "TASK_ADDED", {
-        projectId: input.projectId,
-        taskId: task.id,
-        userId: ctx.session.user.id,
-      }).catch(console.error); // Fire and forget - don't block the response
+      // Execute rules for TASK_ADDED (only if in a project)
+      if (input.projectId) {
+        executeRules(ctx.prisma, "TASK_ADDED", {
+          projectId: input.projectId,
+          taskId: task.id,
+          userId: ctx.session.user.id,
+        }).catch(console.error);
+      }
 
       return task;
     }),

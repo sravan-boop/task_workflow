@@ -19,10 +19,17 @@ import {
   BarChart2,
   Plug,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CreateProjectDialog } from "@/components/project/create-project-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ExternalLink, Trash2, Copy } from "lucide-react";
 
 const mainNav = [
   { label: "Home", href: "/home", icon: Home },
@@ -50,6 +57,23 @@ export function Sidebar() {
   }, []);
 
   const { data: recents } = trpc.recents.list.useQuery({ limit: 5 });
+  const utils = trpc.useUtils();
+  const removeRecent = trpc.recents.remove.useMutation({
+    onSuccess: () => {
+      utils.recents.list.invalidate();
+      toast.success("Removed from recents");
+    },
+  });
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: NonNullable<typeof recents>[number] } | null>(null);
+
+  // Close context menu on click outside
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, [contextMenu]);
+
   const { data: workspaces } = trpc.workspaces.list.useQuery();
   const workspaceId = workspaces?.[0]?.id;
 
@@ -107,26 +131,91 @@ export function Sidebar() {
                 Recents
               </h3>
               <ul className="mt-1 space-y-0.5">
-                {recents.map((item) => (
-                  <li key={item.id}>
-                    <Link
-                      href={
-                        item.resourceType === "project"
-                          ? `/projects/${item.resourceId}`
-                          : item.resourceType === "portfolio"
-                            ? `/portfolios/${item.resourceId}`
-                            : item.resourceType === "goal"
-                              ? `/goals/${item.resourceId}`
-                              : `/my-tasks?task=${item.resourceId}`
-                      }
-                      className="flex items-center gap-3 rounded-md px-3 py-1.5 text-sm text-[#6d6e6f] hover:bg-[#f1ece4]/60 hover:text-[#1e1f21]"
-                    >
-                      <Clock className="h-3.5 w-3.5" />
-                      <span className="truncate">{item.resourceName}</span>
-                    </Link>
-                  </li>
-                ))}
+                {recents.map((item) => {
+                  const href =
+                    item.resourceType === "project"
+                      ? `/projects/${item.resourceId}`
+                      : item.resourceType === "portfolio"
+                        ? `/portfolios/${item.resourceId}`
+                        : item.resourceType === "goal"
+                          ? `/goals/${item.resourceId}`
+                          : `/my-tasks?task=${item.resourceId}`;
+                  return (
+                    <li key={item.id}>
+                      <Link
+                        href={href}
+                        className="flex items-center gap-3 rounded-md px-3 py-1.5 text-sm text-[#6d6e6f] hover:bg-[#f1ece4]/60 hover:text-[#1e1f21]"
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setContextMenu({ x: e.clientX, y: e.clientY, item });
+                        }}
+                      >
+                        <Clock className="h-3.5 w-3.5" />
+                        <span className="truncate">{item.resourceName}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
+
+              {/* Right-click Context Menu */}
+              {contextMenu && (
+                <div
+                  className="fixed z-50 min-w-[160px] rounded-md border bg-white py-1 shadow-lg dark:bg-card"
+                  style={{ top: contextMenu.y, left: contextMenu.x }}
+                >
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-[#1e1f21] hover:bg-muted/50"
+                    onClick={() => {
+                      const href =
+                        contextMenu.item.resourceType === "project"
+                          ? `/projects/${contextMenu.item.resourceId}`
+                          : contextMenu.item.resourceType === "portfolio"
+                            ? `/portfolios/${contextMenu.item.resourceId}`
+                            : contextMenu.item.resourceType === "goal"
+                              ? `/goals/${contextMenu.item.resourceId}`
+                              : `/my-tasks?task=${contextMenu.item.resourceId}`;
+                      window.open(href, "_blank");
+                      setContextMenu(null);
+                    }}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Open in new tab
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-[#1e1f21] hover:bg-muted/50"
+                    onClick={() => {
+                      const href =
+                        contextMenu.item.resourceType === "project"
+                          ? `/projects/${contextMenu.item.resourceId}`
+                          : contextMenu.item.resourceType === "portfolio"
+                            ? `/portfolios/${contextMenu.item.resourceId}`
+                            : contextMenu.item.resourceType === "goal"
+                              ? `/goals/${contextMenu.item.resourceId}`
+                              : `/my-tasks?task=${contextMenu.item.resourceId}`;
+                      navigator.clipboard.writeText(window.location.origin + href);
+                      toast.success("Link copied to clipboard");
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Copy link
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-red-600 hover:bg-muted/50"
+                    onClick={() => {
+                      removeRecent.mutate({
+                        resourceType: contextMenu.item.resourceType,
+                        resourceId: contextMenu.item.resourceId,
+                      });
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remove from recents
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

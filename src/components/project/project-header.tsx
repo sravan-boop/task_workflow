@@ -107,7 +107,8 @@ export function ProjectHeader({
   const deleteProject = trpc.projects.delete.useMutation({
     onSuccess: () => {
       utils.projects.list.invalidate();
-      // Clean up the project from Recents sidebar
+      utils.recents.list.invalidate();
+      // Also remove from recents in database
       removeRecent.mutate(
         { resourceType: "project", resourceId: project.id },
         { onSettled: () => utils.recents.list.invalidate() }

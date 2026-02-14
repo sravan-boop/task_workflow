@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,9 +23,14 @@ import {
   Circle,
   Calendar,
   X,
+  Archive,
+  ArchiveRestore,
 } from "lucide-react";
 
 export function AdvancedSearch() {
+  const searchParams = useSearchParams();
+  const isArchiveMode = searchParams.get("filter") === "archived";
+
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dueFilter, setDueFilter] = useState<string>("all");
@@ -32,8 +40,24 @@ export function AdvancedSearch() {
 
   const { data: searchResults, isLoading } = trpc.search.global.useQuery(
     { query, workspaceId: workspaceId! },
-    { enabled: !!workspaceId && query.length >= 1 }
+    { enabled: !!workspaceId && query.length >= 1 && !isArchiveMode }
   );
+
+  // Fetch archived projects
+  const { data: allProjects } = trpc.projects.listAll.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId && isArchiveMode }
+  );
+  const archivedProjects = allProjects?.filter((p) => p.isArchived) || [];
+
+  const utils = trpc.useUtils();
+  const unarchiveProject = trpc.projects.archive.useMutation({
+    onSuccess: () => {
+      utils.projects.listAll.invalidate();
+      utils.projects.list.invalidate();
+      toast.success("Project unarchived");
+    },
+  });
 
   const filteredTasks = searchResults?.tasks.filter((task) => {
     if (statusFilter !== "all" && task.status !== statusFilter) return false;
@@ -51,6 +75,49 @@ export function AdvancedSearch() {
   });
 
   const hasFilters = statusFilter !== "all" || dueFilter !== "all";
+
+  if (isArchiveMode) {
+    return (
+      <div className="h-full bg-white p-6">
+        <div className="mx-auto max-w-4xl">
+          <div className="flex items-center gap-3">
+            <Archive className="h-5 w-5 text-muted-foreground" />
+            <h1 className="text-xl font-semibold text-[#1e1f21]">Archived Projects</h1>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Projects that have been archived. You can unarchive them to make them active again.
+          </p>
+          <div className="mt-6">
+            {archivedProjects.length > 0 ? (
+              <div className="space-y-2">
+                {archivedProjects.map((project) => (
+                  <div key={project.id} className="flex items-center gap-3 rounded-lg border px-4 py-3">
+                    <div className="h-4 w-4 rounded" style={{ backgroundColor: project.color }} />
+                    <span className="flex-1 text-sm font-medium text-[#1e1f21]">{project.name}</span>
+                    {project.team && <span className="text-xs text-muted-foreground">{project.team.name}</span>}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-xs"
+                      onClick={() => unarchiveProject.mutate({ id: project.id, isArchived: false })}
+                    >
+                      <ArchiveRestore className="h-3.5 w-3.5" />
+                      Unarchive
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-20 text-center">
+                <Archive className="mx-auto h-10 w-10 text-muted-foreground/40" />
+                <p className="mt-4 text-sm text-muted-foreground">No archived projects</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full bg-white p-6">

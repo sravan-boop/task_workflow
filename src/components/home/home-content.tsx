@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +16,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { toast } from "sonner";
+import {
   CheckCircle2,
   Circle,
   Users,
@@ -23,6 +31,10 @@ import {
   MoreHorizontal,
   Eye,
   EyeOff,
+  Target,
+  ExternalLink,
+  RefreshCw,
+  Copy,
 } from "lucide-react";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
 
@@ -44,6 +56,20 @@ export function HomeContent() {
   const [mounted, setMounted] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [widgets, setWidgets] = useState<WidgetConfig[]>(DEFAULT_WIDGETS);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; taskId: string } | null>(null);
+  const contextRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = () => setContextMenu(null);
+    if (contextMenu) {
+      document.addEventListener("click", handler);
+      document.addEventListener("contextmenu", handler);
+      return () => {
+        document.removeEventListener("click", handler);
+        document.removeEventListener("contextmenu", handler);
+      };
+    }
+  }, [contextMenu]);
 
   // Load saved widget config from localStorage after mount (avoids hydration mismatch)
   useEffect(() => {
@@ -95,6 +121,13 @@ export function HomeContent() {
     { enabled: !!workspaceId }
   );
 
+  const { data: goals } = trpc.goals.list.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
+
+  const router = useRouter();
+
   const completeTask = trpc.tasks.complete.useMutation({
     onSuccess: () => {
       if (workspaceId) utils.tasks.myTasks.invalidate({ workspaceId });
@@ -123,7 +156,14 @@ export function HomeContent() {
   };
 
   const renderTaskRow = (task: NonNullable<typeof myTasks>[number]) => (
-    <div key={task.id} className="flex items-center gap-2 border-b border-gray-100 py-2">
+    <div
+      key={task.id}
+      className="flex items-center gap-2 border-b border-gray-100 py-2"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setContextMenu({ x: e.clientX, y: e.clientY, taskId: task.id });
+      }}
+    >
       <button onClick={() => completeTask.mutate({ id: task.id })} className="flex-shrink-0">
         {task.status === "COMPLETE" ? (
           <CheckCircle2 className="h-4 w-4 text-green-600" />
@@ -163,9 +203,21 @@ export function HomeContent() {
           <CardTitle className="text-base font-medium">
             <Link href="/my-tasks" className="hover:text-[#4573D2]">My tasks</Link>
           </CardTitle>
-          <Link href="/my-tasks">
-            <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
-          </Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => router.push("/my-tasks")}>
+                <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                Open My Tasks
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { if (workspaceId) utils.tasks.myTasks.invalidate({ workspaceId }); }}>
+                <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                Refresh
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="upcoming" className="w-full">
@@ -246,7 +298,17 @@ export function HomeContent() {
           <CardTitle className="text-base font-medium">
             <Link href="/my-tasks" className="hover:text-[#4573D2]">Tasks I&apos;ve assigned</Link>
           </CardTitle>
-          <Link href="/my-tasks"><Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button></Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => router.push("/my-tasks")}>
+                <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                Open My Tasks
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -255,21 +317,86 @@ export function HomeContent() {
         </CardContent>
       </Card>
     ),
-    goals: () => (
-      <Card key="goals" className="border shadow-sm">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-base font-medium">
-            <Link href="/goals" className="hover:text-[#4573D2]">Goals</Link>
-          </CardTitle>
-          <Link href="/goals"><Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button></Link>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col items-center justify-center py-8 text-center">
-            <p className="text-sm text-muted-foreground">Set goals to track your progress</p>
-          </div>
-        </CardContent>
-      </Card>
-    ),
+    goals: () => {
+      const STATUS_COLORS: Record<string, string> = {
+        ON_TRACK: "#7BC86C",
+        AT_RISK: "#FD9A00",
+        OFF_TRACK: "#E8384F",
+        CLOSED: "#6D6E6F",
+      };
+      const STATUS_LABELS: Record<string, string> = {
+        ON_TRACK: "On track",
+        AT_RISK: "At risk",
+        OFF_TRACK: "Off track",
+        CLOSED: "Closed",
+      };
+      return (
+        <Card key="goals" className="border shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-base font-medium">
+              <Link href="/goals" className="hover:text-[#4573D2]">Goals</Link>
+            </CardTitle>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => router.push("/goals")}>
+                  <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                  Open Goals
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { if (workspaceId) utils.goals.list.invalidate({ workspaceId }); }}>
+                  <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                  Refresh
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </CardHeader>
+          <CardContent>
+            {goals && goals.length > 0 ? (
+              <div className="space-y-3">
+                {goals.slice(0, 5).map((goal) => {
+                  const progress = goal.targetValue > 0 ? Math.round((goal.currentValue / goal.targetValue) * 100) : 0;
+                  return (
+                    <Link key={goal.id} href={`/goals/${goal.id}`} className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-muted/50">
+                      <Target className="h-4 w-4 shrink-0" style={{ color: STATUS_COLORS[goal.status] || "#6D6E6F" }} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[#1e1f21] truncate">{goal.name}</p>
+                        <div className="mt-1 flex items-center gap-2">
+                          <div className="h-1.5 flex-1 rounded-full bg-gray-100">
+                            <div
+                              className="h-1.5 rounded-full transition-all"
+                              style={{ width: `${Math.min(progress, 100)}%`, backgroundColor: STATUS_COLORS[goal.status] || "#6D6E6F" }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-muted-foreground">{progress}%</span>
+                        </div>
+                      </div>
+                      <span
+                        className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
+                        style={{ backgroundColor: STATUS_COLORS[goal.status] || "#6D6E6F" }}
+                      >
+                        {STATUS_LABELS[goal.status] || goal.status}
+                      </span>
+                    </Link>
+                  );
+                })}
+                {goals.length > 5 && (
+                  <Link href="/goals" className="block text-center text-xs text-[#4573D2] hover:underline">
+                    View all {goals.length} goals
+                  </Link>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <p className="text-sm text-muted-foreground">Set goals to track your progress</p>
+                <Link href="/goals" className="mt-2 text-xs text-[#4573D2] hover:underline">Create a goal</Link>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      );
+    },
   };
 
   return (
@@ -343,6 +470,38 @@ export function HomeContent() {
 
       {showOnboarding && (
         <OnboardingWizard onComplete={() => markOnboarded.mutate()} />
+      )}
+
+      {/* Right-click Context Menu for tasks */}
+      {contextMenu && (
+        <div
+          ref={contextRef}
+          className="fixed z-50 min-w-[180px] rounded-md border bg-white py-1 shadow-lg"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => { router.push(`/my-tasks?task=${contextMenu.taskId}`); setContextMenu(null); }}
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> Open task
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => { completeTask.mutate({ id: contextMenu.taskId }); setContextMenu(null); }}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" /> Mark complete
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              navigator.clipboard.writeText(`${window.location.origin}/my-tasks?task=${contextMenu.taskId}`);
+              toast.success("Link copied");
+              setContextMenu(null);
+            }}
+          >
+            <Copy className="h-3.5 w-3.5" /> Copy link
+          </button>
+        </div>
       )}
     </div>
   );
