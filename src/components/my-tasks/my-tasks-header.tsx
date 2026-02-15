@@ -15,6 +15,7 @@ import {
   Plus,
   Download,
   Sparkles,
+  ShieldCheck,
 } from "lucide-react";
 
 export function MyTasksHeader() {
@@ -66,6 +67,10 @@ export function MyTasksHeader() {
             <DropdownMenuItem onClick={handleExportCSV}>
               <Download className="mr-2 h-3.5 w-3.5" />
               Export as CSV
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => toast.info("Viewing pending approvals")}>
+              <ShieldCheck className="mr-2 h-3.5 w-3.5" />
+              View approvals
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => toast.info("AI task suggestions coming soon")}>

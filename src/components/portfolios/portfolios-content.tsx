@@ -150,9 +150,13 @@ export function PortfoliosContent() {
                         <Briefcase className="h-5 w-5 text-[#4573D2]" />
                       </div>
                       <div className="flex-1">
-                        <h3 className="text-sm font-semibold text-[#1e1f21]">
+                        <Link
+                          href={`/portfolios/${portfolio.id}`}
+                          className="text-sm font-semibold text-[#1e1f21] hover:text-[#4573D2] hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           {portfolio.name}
-                        </h3>
+                        </Link>
                         <p className="text-xs text-muted-foreground">
                           {portfolio.projects.length} project
                           {portfolio.projects.length !== 1 ? "s" : ""}
@@ -175,7 +179,7 @@ export function PortfoliosContent() {
                               Rename
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => {
-                              navigator.clipboard.writeText(window.location.origin + `/portfolios?id=${portfolio.id}`);
+                              navigator.clipboard.writeText(window.location.origin + `/portfolios/${portfolio.id}`);
                               toast.success("Portfolio link copied to clipboard");
                             }}>
                               <Share2 className="mr-2 h-3.5 w-3.5" />

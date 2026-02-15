@@ -22,6 +22,10 @@ import {
   CalendarDays,
   Trash2,
   FolderPlus,
+  ShieldCheck,
+  CalendarPlus,
+  Sun,
+  CalendarRange,
 } from "lucide-react";
 import { BulkActionsToolbar } from "@/components/task/bulk-actions-toolbar";
 
@@ -93,6 +97,19 @@ export function ProjectListView({
     onSuccess: () => {
       utils.tasks.list.invalidate({ projectId });
       toast.success("Task duplicated");
+    },
+  });
+
+  const markAsApproval = trpc.tasks.markAsApproval.useMutation({
+    onSuccess: () => {
+      utils.tasks.list.invalidate({ projectId });
+      toast.success("Marked as approval");
+    },
+  });
+
+  const updateTask = trpc.tasks.update.useMutation({
+    onSuccess: () => {
+      utils.tasks.list.invalidate({ projectId });
     },
   });
 
@@ -394,6 +411,52 @@ export function ProjectListView({
             }}
           >
             <Copy className="h-3.5 w-3.5" /> Copy link
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              markAsApproval.mutate({ id: contextMenu.taskId, isApproval: true });
+              setContextMenu(null);
+            }}
+          >
+            <ShieldCheck className="h-3.5 w-3.5" /> Mark as approval
+          </button>
+          <div className="my-1 border-t" />
+          <div className="px-3 py-1 text-xs font-medium text-muted-foreground">Set due date</div>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              const today = new Date();
+              today.setHours(0,0,0,0);
+              updateTask.mutate({ id: contextMenu.taskId, dueDate: today.toISOString() });
+              setContextMenu(null);
+            }}
+          >
+            <Sun className="h-3.5 w-3.5" /> Today
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              const tomorrow = new Date();
+              tomorrow.setDate(tomorrow.getDate() + 1);
+              tomorrow.setHours(0,0,0,0);
+              updateTask.mutate({ id: contextMenu.taskId, dueDate: tomorrow.toISOString() });
+              setContextMenu(null);
+            }}
+          >
+            <CalendarPlus className="h-3.5 w-3.5" /> Tomorrow
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              const nextWeek = new Date();
+              nextWeek.setDate(nextWeek.getDate() + 7);
+              nextWeek.setHours(0,0,0,0);
+              updateTask.mutate({ id: contextMenu.taskId, dueDate: nextWeek.toISOString() });
+              setContextMenu(null);
+            }}
+          >
+            <CalendarRange className="h-3.5 w-3.5" /> Next week
           </button>
           <div className="my-1 border-t" />
           <button

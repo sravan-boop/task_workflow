@@ -554,6 +554,57 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
             </div>
           </div>
 
+          {/* Quick Schedule */}
+          <div className="flex items-center">
+            <div className="flex w-32 items-center gap-2 text-sm text-muted-foreground">
+              <CalendarDays className="h-4 w-4" />
+              Schedule
+            </div>
+            <div className="flex gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-[10px] px-2"
+                onClick={() => {
+                  const today = new Date();
+                  today.setHours(0,0,0,0);
+                  updateTask.mutate({ id: taskId, dueDate: today.toISOString() });
+                  toast.success("Scheduled for today");
+                }}
+              >
+                Today
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-[10px] px-2"
+                onClick={() => {
+                  const nextWeek = new Date();
+                  nextWeek.setDate(nextWeek.getDate() + 7);
+                  nextWeek.setHours(0,0,0,0);
+                  updateTask.mutate({ id: taskId, dueDate: nextWeek.toISOString() });
+                  toast.success("Scheduled for next week");
+                }}
+              >
+                Next week
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-[10px] px-2"
+                onClick={() => {
+                  const later = new Date();
+                  later.setDate(later.getDate() + 30);
+                  later.setHours(0,0,0,0);
+                  updateTask.mutate({ id: taskId, dueDate: later.toISOString() });
+                  toast.success("Scheduled for later");
+                }}
+              >
+                Later
+              </Button>
+            </div>
+          </div>
+
           {/* Estimated Hours */}
           <div className="flex items-center">
             <div className="flex w-32 items-center gap-2 text-sm text-muted-foreground">

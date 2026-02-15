@@ -93,13 +93,23 @@ export const goalsRouter = router({
         status: z.enum(["ON_TRACK", "AT_RISK", "OFF_TRACK", "CLOSED"]).optional(),
         currentValue: z.number().optional(),
         targetValue: z.number().optional(),
+        timePeriodStart: z.string().datetime().optional(),
+        timePeriodEnd: z.string().datetime().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { id, ...data } = input;
+      const { id, timePeriodStart, timePeriodEnd, ...data } = input;
       return ctx.prisma.goal.update({
         where: { id },
-        data,
+        data: {
+          ...data,
+          ...(timePeriodStart !== undefined && {
+            timePeriodStart: new Date(timePeriodStart),
+          }),
+          ...(timePeriodEnd !== undefined && {
+            timePeriodEnd: new Date(timePeriodEnd),
+          }),
+        },
       });
     }),
 

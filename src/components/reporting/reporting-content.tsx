@@ -175,6 +175,24 @@ export function ReportingContent() {
           <Download className="h-3.5 w-3.5" />
           Export CSV
         </Button>
+        <Button
+          variant="default"
+          size="sm"
+          className="gap-1.5 text-xs bg-[#4573D2] hover:bg-[#3A63B8]"
+          onClick={() => {
+            const name = prompt("Dashboard name:");
+            if (name && workspaceId) {
+              saveReport.mutate({
+                workspaceId,
+                name: `Dashboard: ${name}`,
+                config: { type: "dashboard", widgets: ["tasks", "projects", "activity", "burnup"] },
+              });
+            }
+          }}
+        >
+          <BarChart3 className="h-3.5 w-3.5" />
+          Create Dashboard
+        </Button>
       </div>
 
       {/* Saved Reports Panel */}
@@ -267,6 +285,46 @@ export function ReportingContent() {
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Team Workload Section */}
+      <div className="mt-6">
+        <h3 className="mb-3 text-base font-medium text-[#1e1f21]">Team Workload</h3>
+        <div className="rounded-lg border bg-white p-5 dark:bg-card">
+          <div className="flex items-center gap-6">
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm text-muted-foreground">Tasks distribution</span>
+                <span className="text-xs text-muted-foreground">{totalTasks} total</span>
+              </div>
+              <div className="h-3 w-full rounded-full bg-gray-100 overflow-hidden flex">
+                {completedTasks > 0 && (
+                  <div
+                    className="h-3"
+                    style={{ width: `${(completedTasks / Math.max(totalTasks, 1)) * 100}%`, backgroundColor: COLORS.green }}
+                  />
+                )}
+                {inProgressTasks > 0 && (
+                  <div
+                    className="h-3"
+                    style={{ width: `${(inProgressTasks / Math.max(totalTasks, 1)) * 100}%`, backgroundColor: COLORS.blue }}
+                  />
+                )}
+                {overdueTasks > 0 && (
+                  <div
+                    className="h-3"
+                    style={{ width: `${(overdueTasks / Math.max(totalTasks, 1)) * 100}%`, backgroundColor: COLORS.red }}
+                  />
+                )}
+              </div>
+              <div className="mt-2 flex gap-4 text-xs">
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{backgroundColor: COLORS.green}} />Completed ({completedTasks})</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{backgroundColor: COLORS.blue}} />In Progress ({inProgressTasks})</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{backgroundColor: COLORS.red}} />Overdue ({overdueTasks})</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Charts Row 1: Pie + Bar */}

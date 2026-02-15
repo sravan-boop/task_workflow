@@ -18,6 +18,7 @@ import {
   Clock,
   BarChart2,
   Plug,
+  GitBranch,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
@@ -42,6 +43,7 @@ const insightsNav = [
   { label: "Portfolios", href: "/portfolios", icon: Briefcase },
   { label: "Goals", href: "/goals", icon: Target },
   { label: "Workload", href: "/workload", icon: BarChart2 },
+  { label: "Workflows", href: "/workflows", icon: GitBranch },
 ];
 
 export function Sidebar() {

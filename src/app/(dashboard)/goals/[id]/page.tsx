@@ -36,7 +36,8 @@ export default function GoalDetailPage() {
   const router = useRouter();
   const goalId = params.id as string;
 
-  const { data: goal, isLoading } = trpc.goals.get.useQuery({ id: goalId });
+  const { data: goalData, isLoading } = trpc.goals.get.useQuery({ id: goalId });
+  const goal = goalData as any;
   const utils = trpc.useUtils();
 
   const [editingName, setEditingName] = useState(false);
@@ -232,6 +233,53 @@ export default function GoalDetailPage() {
           </div>
         </div>
 
+        {/* Goal Details */}
+        <div className="mt-6 rounded-lg border p-5">
+          <h2 className="mb-4 text-sm font-medium text-[#6d6e6f]">Details</h2>
+          <div className="space-y-3">
+            {/* Owner */}
+            <div className="flex items-center">
+              <span className="w-36 text-sm text-muted-foreground">Goal owner</span>
+              <span className="text-sm">{goal.ownerId ? "Assigned" : "Not set"}</span>
+            </div>
+            {/* Time Period */}
+            <div className="flex items-center">
+              <span className="w-36 text-sm text-muted-foreground">Time period</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  className="rounded border border-transparent bg-transparent px-2 py-1 text-sm hover:border-gray-200 focus:border-[#4573D2] focus:outline-none"
+                  value={goal.timePeriodStart ? new Date(goal.timePeriodStart).toISOString().split("T")[0] : ""}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateGoal.mutate({ id: goalId, timePeriodStart: val ? new Date(val + "T00:00:00.000Z").toISOString() : undefined } as any);
+                  }}
+                />
+                <span className="text-xs text-muted-foreground">to</span>
+                <input
+                  type="date"
+                  className="rounded border border-transparent bg-transparent px-2 py-1 text-sm hover:border-gray-200 focus:border-[#4573D2] focus:outline-none"
+                  value={goal.timePeriodEnd ? new Date(goal.timePeriodEnd).toISOString().split("T")[0] : ""}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateGoal.mutate({ id: goalId, timePeriodEnd: val ? new Date(val + "T00:00:00.000Z").toISOString() : undefined } as any);
+                  }}
+                />
+              </div>
+            </div>
+            {/* Accountable Team */}
+            <div className="flex items-center">
+              <span className="w-36 text-sm text-muted-foreground">Accountable team</span>
+              <span className="text-sm">{goal.team?.name || "No team"}</span>
+            </div>
+            {/* Description */}
+            <div className="flex items-start">
+              <span className="w-36 pt-1 text-sm text-muted-foreground">Description</span>
+              <span className="text-sm text-[#1e1f21]">{goal.description || "No description"}</span>
+            </div>
+          </div>
+        </div>
+
         {/* Sub-goals */}
         {goal.childGoals && goal.childGoals.length > 0 && (
           <div className="mt-8">
@@ -239,7 +287,7 @@ export default function GoalDetailPage() {
               Sub-goals ({goal.childGoals.length})
             </h2>
             <div className="space-y-2">
-              {goal.childGoals.map((sub) => {
+              {goal.childGoals.map((sub: any) => {
                 const subConfig = STATUS_CONFIG[sub.status] || STATUS_CONFIG.ON_TRACK;
                 const subProgress = sub.targetValue > 0 ? Math.round((sub.currentValue / sub.targetValue) * 100) : 0;
                 return (

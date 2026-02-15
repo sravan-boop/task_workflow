@@ -501,6 +501,19 @@ export function HomeContent() {
           >
             <Copy className="h-3.5 w-3.5" /> Copy link
           </button>
+          <div className="my-1 border-t" />
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              const today = new Date();
+              today.setHours(0,0,0,0);
+              completeTask.mutate({ id: contextMenu.taskId });
+              toast.success("Due date set to today");
+              setContextMenu(null);
+            }}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" /> Do it today
+          </button>
         </div>
       )}
     </div>
