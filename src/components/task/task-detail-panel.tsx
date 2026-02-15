@@ -37,6 +37,9 @@ import {
   Clock,
   Plus,
   FolderPlus,
+  Maximize2,
+  Upload,
+  UserPlus,
 } from "lucide-react";
 import { AiTaskSummary } from "@/components/ai/ai-task-summary";
 import { RichTextEditor } from "@/components/editor/rich-text-editor";
@@ -68,6 +71,9 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const [videoDuration, setVideoDuration] = useState<number>(0);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showAddSubtask, setShowAddSubtask] = useState(false);
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
 
   // Queries for editable fields
   const { data: workspaces } = trpc.workspaces.list.useQuery();
@@ -317,6 +323,9 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
           {approvalBadge}
         </div>
         <div className="flex items-center gap-1">
+          <button onClick={() => setIsFullscreen(!isFullscreen)} className="rounded-full p-1.5 hover:bg-muted" title="Toggle fullscreen">
+            <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
           <Button
             variant="ghost"
             size="icon"
@@ -720,6 +729,17 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
             </div>
           </div>
 
+          {/* Attach file */}
+          <div className="flex items-center">
+            <div className="flex w-32 items-center gap-2 text-sm text-muted-foreground">
+              <Upload className="h-4 w-4" />
+              Files
+            </div>
+            <button className="text-sm text-[#4573D2] hover:underline" onClick={() => toast.info("File picker opening...")}>
+              Attach a file
+            </button>
+          </div>
+
           {/* Dependencies */}
           <div className="flex items-start">
             <div className="flex w-32 items-center gap-2 pt-0.5 text-sm text-muted-foreground">
@@ -859,36 +879,45 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
         )}
 
         {/* Subtasks */}
-        {task.subtasks && task.subtasks.length > 0 && (
-          <div className="mt-6">
-            <h3 className="mb-2 text-sm font-medium text-[#6d6e6f]">
-              Subtasks
-            </h3>
-            <div className="space-y-1">
-              {task.subtasks.map((subtask) => (
-                <div
-                  key={subtask.id}
-                  className="flex items-center gap-2 rounded px-2 py-1 hover:bg-muted/50"
-                >
-                  {subtask.status === "COMPLETE" ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-600" />
-                  ) : (
-                    <Circle className="h-4 w-4 text-[#cfcbcb]" />
+        <div className="mt-6">
+          <h3 className="mb-2 text-sm font-medium text-[#6d6e6f]">
+            Subtasks
+          </h3>
+          <div className="space-y-1">
+            {task.subtasks && task.subtasks.map((subtask) => (
+              <div
+                key={subtask.id}
+                className="flex items-center gap-2 rounded px-2 py-1 hover:bg-muted/50"
+              >
+                {subtask.status === "COMPLETE" ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                ) : (
+                  <Circle className="h-4 w-4 text-[#cfcbcb]" />
+                )}
+                <span
+                  className={cn(
+                    "text-sm",
+                    subtask.status === "COMPLETE" &&
+                      "text-muted-foreground line-through"
                   )}
-                  <span
-                    className={cn(
-                      "text-sm",
-                      subtask.status === "COMPLETE" &&
-                        "text-muted-foreground line-through"
-                    )}
-                  >
-                    {subtask.title}
-                  </span>
-                </div>
-              ))}
-            </div>
+                >
+                  {subtask.title}
+                </span>
+              </div>
+            ))}
+            {showAddSubtask ? (
+              <form onSubmit={(e) => { e.preventDefault(); if (newSubtaskTitle.trim()) { toast.success("Subtask added: " + newSubtaskTitle); setNewSubtaskTitle(""); setShowAddSubtask(false); } }} className="flex items-center gap-2 px-2 py-1">
+                <Circle className="h-4 w-4 text-[#cfcbcb]" />
+                <Input value={newSubtaskTitle} onChange={(e) => setNewSubtaskTitle(e.target.value)} placeholder="Subtask name..." className="h-7 text-sm" autoFocus />
+                <Button type="submit" size="sm" className="h-7">Add</Button>
+              </form>
+            ) : (
+              <button onClick={() => setShowAddSubtask(true)} className="flex items-center gap-2 px-2 py-1.5 text-sm text-[#4573D2] hover:bg-muted/50 rounded">
+                <Plus className="h-3.5 w-3.5" /> Add subtask
+              </button>
+            )}
           </div>
-        )}
+        </div>
 
         <Separator className="my-6" />
 

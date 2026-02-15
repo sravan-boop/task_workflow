@@ -15,6 +15,9 @@ import {
   Bookmark,
   Download,
   Trash2,
+  Plus,
+  Heart,
+  Activity,
 } from "lucide-react";
 import {
   BarChart,
@@ -45,6 +48,7 @@ export function ReportingContent() {
   const { data: workspaces } = trpc.workspaces.list.useQuery();
   const workspaceId = workspaces?.[0]?.id;
   const [showSavedReports, setShowSavedReports] = useState(false);
+  const [activeDashboard, setActiveDashboard] = useState<string | null>(null);
 
   const { data: savedReports } = trpc.savedReports.list.useQuery(
     { workspaceId: workspaceId! },
@@ -198,24 +202,119 @@ export function ReportingContent() {
       {/* Saved Reports Panel */}
       {showSavedReports && savedReports && savedReports.length > 0 && (
         <div className="mb-6 rounded-lg border bg-white p-4 dark:bg-card">
-          <h3 className="mb-3 text-sm font-medium">Saved Reports</h3>
+          <h3 className="mb-3 text-sm font-medium">Saved Reports & Dashboards</h3>
           <div className="space-y-2">
-            {savedReports.map((report) => (
-              <div
-                key={report.id}
-                className="flex items-center justify-between rounded-lg border px-3 py-2"
-              >
-                <span className="text-sm">{report.name}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-destructive"
-                  onClick={() => deleteReport.mutate({ id: report.id })}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
+            {savedReports.map((report) => {
+              const config = report.config as any;
+              const isDashboard = config?.type === "dashboard";
+              const isActive = activeDashboard === report.id;
+              return (
+                <div key={report.id}>
+                  <div
+                    className={`flex items-center justify-between rounded-lg border px-3 py-2 transition-colors ${
+                      isActive ? "border-[#4573D2] bg-[#4573D2]/5" : ""
+                    }`}
+                  >
+                    <button
+                      className="text-sm text-left hover:text-[#4573D2] hover:underline flex items-center gap-2"
+                      onClick={() => {
+                        if (isDashboard) {
+                          setActiveDashboard(isActive ? null : report.id);
+                        } else {
+                          toast.info(`Opening report: ${report.name}`);
+                        }
+                      }}
+                    >
+                      {isDashboard && <BarChart3 className="h-3.5 w-3.5 text-[#4573D2]" />}
+                      {report.name}
+                    </button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive"
+                      onClick={() => deleteReport.mutate({ id: report.id })}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  {/* Dashboard detail view */}
+                  {isDashboard && isActive && (
+                    <div className="ml-4 mt-2 space-y-3 rounded-lg border bg-muted/20 p-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium">{report.name}</h4>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1 text-xs"
+                          onClick={() => {
+                            if (workspaceId) {
+                              saveReport.mutate({
+                                workspaceId,
+                                name: `Chart: Custom`,
+                                config: { type: "custom-chart" },
+                              });
+                            }
+                          }}
+                        >
+                          <Plus className="h-3 w-3" />
+                          Add chart
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-lg border bg-white p-3">
+                          <p className="text-xs font-medium text-muted-foreground mb-2">Tasks Overview</p>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 items-center justify-center rounded bg-green-100">
+                              <CheckCircle2 className="h-4 w-4 text-green-600" />
+                            </div>
+                            <div>
+                              <p className="text-lg font-semibold">{completedTasks}</p>
+                              <p className="text-[10px] text-muted-foreground">Completed</p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="rounded-lg border bg-white p-3">
+                          <p className="text-xs font-medium text-muted-foreground mb-2">Work Health</p>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 items-center justify-center rounded bg-blue-100">
+                              <TrendingUp className="h-4 w-4 text-blue-600" />
+                            </div>
+                            <div>
+                              <p className="text-lg font-semibold">{totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0}%</p>
+                              <p className="text-[10px] text-muted-foreground">Progress</p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="rounded-lg border bg-white p-3">
+                          <p className="text-xs font-medium text-muted-foreground mb-2">In Progress</p>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 items-center justify-center rounded bg-yellow-100">
+                              <Clock className="h-4 w-4 text-yellow-600" />
+                            </div>
+                            <div>
+                              <p className="text-lg font-semibold">{inProgressTasks}</p>
+                              <p className="text-[10px] text-muted-foreground">Tasks</p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="rounded-lg border bg-white p-3">
+                          <p className="text-xs font-medium text-muted-foreground mb-2">Overdue</p>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 items-center justify-center rounded bg-red-100">
+                              <AlertTriangle className="h-4 w-4 text-red-600" />
+                            </div>
+                            <div>
+                              <p className="text-lg font-semibold">{overdueTasks}</p>
+                              <p className="text-[10px] text-muted-foreground">Tasks</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -451,6 +550,69 @@ export function ReportingContent() {
         </Card>
       </div>
 
+      {/* Work Health & Progress */}
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card className="border shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base font-medium">
+              <Heart className="h-4 w-4 text-red-500" />
+              Work Health
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Tasks on track</span>
+                <span className="text-sm font-medium text-green-600">{completedTasks + (tasksByStatus?.onTrack ?? 0)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Tasks at risk</span>
+                <span className="text-sm font-medium text-yellow-600">{overdueTasks > 0 ? Math.ceil(overdueTasks / 2) : 0}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Tasks off track</span>
+                <span className="text-sm font-medium text-red-600">{overdueTasks}</span>
+              </div>
+              <div className="mt-2 h-2 w-full rounded-full bg-gray-100 overflow-hidden flex">
+                <div className="h-2" style={{ width: `${totalTasks > 0 ? ((completedTasks + (tasksByStatus?.onTrack ?? 0)) / totalTasks) * 100 : 0}%`, backgroundColor: COLORS.green }} />
+                <div className="h-2" style={{ width: `${totalTasks > 0 ? (Math.ceil(overdueTasks / 2) / totalTasks) * 100 : 0}%`, backgroundColor: COLORS.yellow }} />
+                <div className="h-2" style={{ width: `${totalTasks > 0 ? (overdueTasks / totalTasks) * 100 : 0}%`, backgroundColor: COLORS.red }} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base font-medium">
+              <Activity className="h-4 w-4 text-[#4573D2]" />
+              Progress
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm text-muted-foreground">Overall completion</span>
+                  <span className="text-sm font-medium">{totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0}%</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-gray-100">
+                  <div className="h-2 rounded-full bg-[#4573D2]" style={{ width: `${totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0}%` }} />
+                </div>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Tasks completed this week</span>
+                <span className="font-medium">{weeklyActivity?.[weeklyActivity.length - 1]?.completed ?? 0}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Tasks created this week</span>
+                <span className="font-medium">{weeklyActivity?.[weeklyActivity.length - 1]?.created ?? 0}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Charts Row 2: Area + Line */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Weekly Activity Area Chart */}
@@ -619,6 +781,63 @@ export function ReportingContent() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      {/* Custom Charts Section */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-medium text-[#1e1f21]">Custom Charts</h3>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={() => {
+              const name = prompt("Chart name:");
+              if (name && workspaceId) {
+                saveReport.mutate({
+                  workspaceId,
+                  name: `Chart: ${name}`,
+                  config: { type: "custom-chart" },
+                });
+              }
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add chart
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {savedReports?.filter((r) => (r.config as any)?.type === "custom-chart").map((report) => (
+            <Card key={report.id} className="border shadow-sm cursor-pointer hover:border-[#4573D2] transition-colors">
+              <CardContent className="pt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">{report.name.replace("Chart: ", "")}</span>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => deleteReport.mutate({ id: report.id })}>
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+                <div className="flex h-24 items-center justify-center rounded bg-muted/30 text-xs text-muted-foreground">
+                  Chart visualization
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          <Card className="border border-dashed shadow-sm cursor-pointer hover:border-[#4573D2] transition-colors" onClick={() => {
+            const name = prompt("Chart name:");
+            if (name && workspaceId) {
+              saveReport.mutate({
+                workspaceId,
+                name: `Chart: ${name}`,
+                config: { type: "custom-chart" },
+              });
+            }
+          }}>
+            <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+              <Plus className="h-8 w-8 text-muted-foreground/30" />
+              <p className="mt-2 text-sm text-muted-foreground">Add a custom chart</p>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

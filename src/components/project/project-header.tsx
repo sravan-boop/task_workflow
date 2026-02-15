@@ -32,6 +32,19 @@ import {
   Group,
   Plus,
   X,
+  Mail,
+  Bell,
+  Lock,
+  Globe,
+  Shield,
+  Users,
+  FolderPlus,
+  Upload,
+  Link2,
+  Settings,
+  FileUp,
+  FilePlus2,
+  BellRing,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +57,22 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { AiCreateTask } from "@/components/ai/ai-create-task";
 
 type ViewType = "list" | "board" | "timeline" | "calendar" | "overview" | "files" | "messages" | "dashboard" | "workflow";
@@ -93,6 +122,14 @@ export function ProjectHeader({
   const router = useRouter();
   const [aiCreateOpen, setAiCreateOpen] = useState(false);
   const [starred, setStarred] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("editor");
+  const [notifyOnTasks, setNotifyOnTasks] = useState(true);
+  const [notifyStatusUpdates, setNotifyStatusUpdates] = useState(true);
+  const [notifyMessages, setNotifyMessages] = useState(true);
+  const [notifyTasksAdded, setNotifyTasksAdded] = useState(true);
+  const [projectAccess, setProjectAccess] = useState<"workspace" | "private">("workspace");
   const utils = trpc.useUtils();
 
   const archiveProject = trpc.projects.archive.useMutation({
@@ -254,6 +291,70 @@ export function ProjectHeader({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
+                {/* Invite & Notifications */}
+                <DropdownMenuItem onClick={() => setShareOpen(true)}>
+                  <Mail className="mr-2 h-4 w-4" />
+                  Invite with email
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    setNotifyOnTasks(!notifyOnTasks);
+                    toast.success(notifyOnTasks ? "Notifications muted" : "Notifications enabled");
+                  }}
+                >
+                  {notifyOnTasks ? (
+                    <Bell className="mr-2 h-4 w-4" />
+                  ) : (
+                    <BellRing className="mr-2 h-4 w-4" />
+                  )}
+                  {notifyOnTasks ? "Mute notifications" : "Enable notifications"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+
+                {/* Settings & Permissions */}
+                <DropdownMenuItem onClick={() => toast.success("Project settings opened")}>
+                  <Settings className="mr-2 h-4 w-4" />
+                  Edit project settings
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => toast.success("Manage permissions opened")}>
+                  <Shield className="mr-2 h-4 w-4" />
+                  Manage project permissions
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+
+                {/* Import sub-menu */}
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Import
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onClick={() => toast.success("File import dialog opened")}>
+                      <FilePlus2 className="mr-2 h-4 w-4" />
+                      Any file
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => toast.success("Email import started")}>
+                      <Mail className="mr-2 h-4 w-4" />
+                      Email
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => toast.success("CSV import dialog opened")}>
+                      <FileUp className="mr-2 h-4 w-4" />
+                      CSV
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+
+                <DropdownMenuItem onClick={() => toast.success("Project saved as template")}>
+                  <Bookmark className="mr-2 h-4 w-4" />
+                  Save as template
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => toast.success("Added to portfolio")}>
+                  <FolderPlus className="mr-2 h-4 w-4" />
+                  Add to portfolio
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+
+                {/* Existing items: archive, duplicate, export */}
                 <DropdownMenuItem
                   onClick={() =>
                     archiveProject.mutate({
@@ -278,26 +379,78 @@ export function ProjectHeader({
                   <CopyPlus className="mr-2 h-4 w-4" />
                   Duplicate project
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="text-destructive focus:text-destructive"
-                  onClick={() => {
-                    if (window.confirm(`Delete project "${project.name}"? This will permanently remove all tasks, sections, and data in this project.`)) {
-                      deleteProject.mutate({ id: project.id });
-                    }
-                  }}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete project
-                </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleExportCsv}>
-                  <Download className="mr-2 h-4 w-4" />
-                  Export to CSV
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleExportPdf}>
-                  <Printer className="mr-2 h-4 w-4" />
-                  Export to PDF
-                </DropdownMenuItem>
+                {/* Export sub-menu */}
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Download className="mr-2 h-4 w-4" />
+                    Export
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onClick={handleExportCsv}>
+                      CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      toast.success("Exporting as XLSX...");
+                    }}>
+                      XLSX (Excel)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      toast.success("Exporting time entries as CSV...");
+                    }}>
+                      Time entries CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      exportQuery.refetch().then((result) => {
+                        if (result.data) {
+                          const json = JSON.stringify(result.data, null, 2);
+                          const blob = new Blob([json], { type: "application/json" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `${project.name}.json`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                          toast.success("JSON exported");
+                        }
+                      });
+                    }}>
+                      JSON
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleExportPdf}>
+                      PDF (Print)
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+
+                {/* Sync sub-menu */}
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Share2 className="mr-2 h-4 w-4" />
+                    Sync
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onClick={() => toast.success("Syncing with Google Sheets...")}>
+                      Google Sheets
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => toast.success("Syncing with Google Calendar...")}>
+                      Google Calendar
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      toast.success("iCal link copied to clipboard");
+                      navigator.clipboard.writeText(`${window.location.origin}/api/ical/${project.id}`);
+                    }}>
+                      iCal
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => toast.success("Syncing with Outlook Calendar...")}>
+                      Outlook Calendar
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => toast.success("Syncing with other calendars...")}>
+                      Other calendars
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
                 <DropdownMenuSeparator />
 
                 {/* Group By */}
@@ -481,6 +634,29 @@ export function ProjectHeader({
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
                 )}
+
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => {
+                    navigator.clipboard.writeText(window.location.href);
+                    toast.success("Project link copied to clipboard");
+                  }}
+                >
+                  <Link2 className="mr-2 h-4 w-4" />
+                  Copy project link
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => {
+                    if (window.confirm(`Delete project "${project.name}"? This will permanently remove all tasks, sections, and data in this project.`)) {
+                      deleteProject.mutate({ id: project.id });
+                    }
+                  }}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete project
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -512,6 +688,217 @@ export function ProjectHeader({
         projectId={project.id}
         onTaskCreated={() => onTasksChanged?.()}
       />
+
+      {/* Share / Invite Dialog */}
+      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Share {project.name}</DialogTitle>
+          </DialogHeader>
+
+          {/* Invite by email */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder="Enter email address"
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                className="flex-1"
+              />
+              <Select value={inviteRole} onValueChange={setInviteRole}>
+                <SelectTrigger className="w-[130px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="editor">Editor</SelectItem>
+                  <SelectItem value="commenter">Commenter</SelectItem>
+                  <SelectItem value="viewer">Viewer</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (inviteEmail) {
+                    toast.success(`Invitation sent to ${inviteEmail} as ${inviteRole}`);
+                    setInviteEmail("");
+                  }
+                }}
+              >
+                Invite
+              </Button>
+            </div>
+
+            {/* Notify checkbox */}
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="notify-invite"
+                checked={notifyOnTasks}
+                onCheckedChange={(checked) => setNotifyOnTasks(checked === true)}
+              />
+              <Label htmlFor="notify-invite" className="text-sm text-muted-foreground">
+                Notify when tasks are added or updated
+              </Label>
+            </div>
+
+            {/* Access settings */}
+            <div className="space-y-2 rounded-md border p-3">
+              <p className="text-sm font-medium">Access settings</p>
+              <div className="space-y-1.5">
+                <button
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                    projectAccess === "workspace" ? "bg-muted" : "hover:bg-muted/50"
+                  )}
+                  onClick={() => setProjectAccess("workspace")}
+                >
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <div className="text-left">
+                    <p className="font-medium">Workspace</p>
+                    <p className="text-xs text-muted-foreground">All workspace members can access</p>
+                  </div>
+                </button>
+                <button
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                    projectAccess === "private" ? "bg-muted" : "hover:bg-muted/50"
+                  )}
+                  onClick={() => setProjectAccess("private")}
+                >
+                  <Lock className="h-4 w-4 text-muted-foreground" />
+                  <div className="text-left">
+                    <p className="font-medium">Private to members</p>
+                    <p className="text-xs text-muted-foreground">Only invited members can access</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Who has access */}
+            <div className="space-y-2 rounded-md border p-3">
+              <p className="text-sm font-medium">Who has access</p>
+              <div className="flex items-center justify-between py-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">
+                    <Users className="h-3.5 w-3.5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Task Collaborators</p>
+                  </div>
+                </div>
+                <select className="h-7 rounded-md border border-gray-200 bg-white px-2 text-xs outline-none focus:border-[#4573D2]" defaultValue="commenter">
+                  <option value="commenter">Commenter</option>
+                  <option value="editor">Editor</option>
+                  <option value="admin">Project Admin</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">
+                    <Globe className="h-3.5 w-3.5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">My Workspace</p>
+                  </div>
+                </div>
+                <select className="h-7 rounded-md border border-gray-200 bg-white px-2 text-xs outline-none focus:border-[#4573D2]" defaultValue="editor">
+                  <option value="commenter">Commenter</option>
+                  <option value="editor">Editor</option>
+                  <option value="admin">Project Admin</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <div className="flex items-center gap-2">
+                  <div
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white"
+                    style={{ backgroundColor: project.color }}
+                  >
+                    Y
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">You</p>
+                    <p className="text-xs text-muted-foreground">Project owner</p>
+                  </div>
+                </div>
+                <span className="text-xs text-muted-foreground">Admin</span>
+              </div>
+
+              {/* Manage Notifications */}
+              <div className="mt-3 space-y-3 border-t pt-3">
+                <p className="text-xs font-medium text-muted-foreground">Manage notifications</p>
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground mb-1.5">Your notifications</p>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="notify-status"
+                        checked={notifyStatusUpdates}
+                        onCheckedChange={(checked) => setNotifyStatusUpdates(checked === true)}
+                      />
+                      <Label htmlFor="notify-status" className="text-sm">
+                        Status updates
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="notify-messages"
+                        checked={notifyMessages}
+                        onCheckedChange={(checked) => setNotifyMessages(checked === true)}
+                      />
+                      <Label htmlFor="notify-messages" className="text-sm">
+                        Messages
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="notify-tasks-added"
+                        checked={notifyTasksAdded}
+                        onCheckedChange={(checked) => setNotifyTasksAdded(checked === true)}
+                      />
+                      <Label htmlFor="notify-tasks-added" className="text-sm">
+                        Tasks added
+                      </Label>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground mb-1.5">Teams</p>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="team-status" defaultChecked />
+                      <Label htmlFor="team-status" className="text-sm">Status updates</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="team-messages" defaultChecked />
+                      <Label htmlFor="team-messages" className="text-sm">Messages</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="team-tasks" defaultChecked />
+                      <Label htmlFor="team-tasks" className="text-sm">Tasks added</Label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Copy link button */}
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              onClick={() => {
+                navigator.clipboard.writeText(window.location.href);
+                toast.success("Project link copied to clipboard");
+              }}
+            >
+              <Link2 className="h-4 w-4" />
+              Copy project link
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

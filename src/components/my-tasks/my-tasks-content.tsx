@@ -8,6 +8,13 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { TaskDetailPanel } from "@/components/task/task-detail-panel";
 import { toast } from "sonner";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Plus,
   List,
   Columns3,
@@ -23,6 +30,13 @@ import {
   CalendarPlus,
   Sun,
   CalendarRange,
+  Flag,
+  GitBranch,
+  ChevronDown,
+  Sparkles,
+  Mail,
+  Download,
+  MoreHorizontal,
 } from "lucide-react";
 
 type ViewMode = "list" | "board" | "calendar";
@@ -159,6 +173,66 @@ export function MyTasksContent() {
   return (
     <div className="flex h-[calc(100%-56px)]">
       <div className="flex-1 overflow-y-auto">
+        {/* Header with dropdown */}
+        <div className="flex items-center justify-between border-b bg-white px-6 py-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-medium text-[#1e1f21]">My Tasks</h2>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-52">
+                <DropdownMenuItem onClick={() => document.dispatchEvent(new CustomEvent("quick-add-task"))}>
+                  <Plus className="mr-2 h-3.5 w-3.5" />
+                  Quick add task
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => toast.info("Showing approvals...")}>
+                  <ShieldCheck className="mr-2 h-3.5 w-3.5" />
+                  View approvals
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => toast.info("AI task creation...")}>
+                  <Sparkles className="mr-2 h-3.5 w-3.5" />
+                  Add tasks via AI
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => toast.info("Email task import...")}>
+                  <Mail className="mr-2 h-3.5 w-3.5" />
+                  Add tasks via email
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => toast.info("Sync/export options...")}>
+                  <Download className="mr-2 h-3.5 w-3.5" />
+                  Sync / Export
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => document.dispatchEvent(new CustomEvent("quick-add-task"))}>
+                Create task
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toast.info("Showing all approvals...")}>
+                View approvals
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => toast.info("Filtering incomplete tasks...")}>
+                Show incomplete only
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toast.info("Filtering completed tasks...")}>
+                Show completed only
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
         {/* View Tabs */}
         <div className="flex items-center gap-1 border-b bg-white px-6 py-1">
           {([
@@ -442,6 +516,24 @@ export function MyTasksContent() {
             }}
           >
             <ShieldCheck className="h-3.5 w-3.5" /> Mark as approval
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              toast.success("Marked as milestone");
+              setContextMenu(null);
+            }}
+          >
+            <Flag className="h-3.5 w-3.5" /> Mark as milestone
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              toast.success("Follow up task created");
+              setContextMenu(null);
+            }}
+          >
+            <GitBranch className="h-3.5 w-3.5" /> Create follow up task
           </button>
           <div className="my-1 border-t" />
           <div className="px-3 py-1 text-xs font-medium text-muted-foreground">Set due date</div>

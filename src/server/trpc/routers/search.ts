@@ -32,12 +32,11 @@ export const searchRouter = router({
           where: {
             workspaceId: input.workspaceId,
             name: { contains: input.query, mode: "insensitive" },
-            isArchived: false,
           },
           include: {
             team: true,
           },
-          take: 5,
+          take: 10,
           orderBy: { updatedAt: "desc" },
         }),
         // Search people in workspace
@@ -233,7 +232,6 @@ Respond ONLY with valid JSON (no markdown, no code fences):
       const projects = await ctx.prisma.project.findMany({
         where: {
           workspaceId: input.workspaceId,
-          isArchived: false,
           OR: searchTerms.map((term: string) => ({
             name: { contains: term, mode: "insensitive" as const },
           })),

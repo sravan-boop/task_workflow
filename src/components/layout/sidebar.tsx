@@ -19,6 +19,7 @@ import {
   BarChart2,
   Plug,
   GitBranch,
+  MoreHorizontal,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
@@ -51,6 +52,9 @@ export function Sidebar() {
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [teamsExpanded, setTeamsExpanded] = useState(true);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [workExpanded, setWorkExpanded] = useState(true);
+  const [portfoliosExpanded, setPortfoliosExpanded] = useState(true);
+  const [sortOrder, setSortOrder] = useState<"recent" | "alphabetical" | "top">("recent");
 
   useEffect(() => {
     const handler = () => setCreateProjectOpen(true);
@@ -85,6 +89,11 @@ export function Sidebar() {
   );
 
   const { data: teams } = trpc.teams.list.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
+
+  const { data: portfolios } = trpc.portfolios.list.useQuery(
     { workspaceId: workspaceId! },
     { enabled: !!workspaceId }
   );
@@ -246,56 +255,102 @@ export function Sidebar() {
             </ul>
           </div>
 
-          {/* Projects Section */}
+          {/* Work Section */}
           <div className="mt-6">
-            <button
-              onClick={() => setProjectsExpanded(!projectsExpanded)}
-              className="group flex w-full items-center justify-between px-3 text-xs font-medium text-[#6d6e6f]"
-            >
-              Projects
+            <div className="group flex w-full items-center justify-between px-3 text-xs font-medium text-[#6d6e6f]">
+              <button onClick={() => setWorkExpanded(!workExpanded)} className="flex items-center gap-1">
+                Work
+                <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", workExpanded && "rotate-90")} />
+              </button>
               <span className="flex items-center gap-1">
                 <Plus
-                  className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-100"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCreateProjectOpen(true);
-                  }}
+                  className="h-3.5 w-3.5 cursor-pointer opacity-0 transition-opacity group-hover:opacity-100"
+                  onClick={() => setCreateProjectOpen(true)}
                 />
-                <ChevronRight
-                  className={cn(
-                    "h-3.5 w-3.5 transition-transform",
-                    projectsExpanded && "rotate-90"
-                  )}
-                />
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="opacity-0 group-hover:opacity-100 transition-opacity">
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setSortOrder("alphabetical")}>
+                      Alphabetical
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSortOrder("recent")}>
+                      Recent
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSortOrder("top")}>
+                      Top
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </span>
-            </button>
-            {projectsExpanded && (
-              <ul className="mt-1 space-y-0.5">
-                {projects?.map((project) => (
-                  <li key={project.id}>
-                    <Link
-                      href={`/projects/${project.id}`}
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors",
-                        pathname === `/projects/${project.id}`
-                          ? "bg-[#f1ece4] text-[#1e1f21]"
-                          : "text-[#6d6e6f] hover:bg-[#f1ece4]/60 hover:text-[#1e1f21]"
-                      )}
-                    >
-                      <div
-                        className="h-3 w-3 rounded-sm"
-                        style={{ backgroundColor: project.color }}
-                      />
-                      <span className="truncate">{project.name}</span>
-                    </Link>
-                  </li>
-                ))}
-                {(!projects || projects.length === 0) && (
-                  <li className="px-3 py-1.5 text-xs text-muted-foreground">
-                    No projects yet
-                  </li>
+            </div>
+            {workExpanded && (
+              <div className="mt-1">
+                {/* Projects sub-section */}
+                <button
+                  onClick={() => setProjectsExpanded(!projectsExpanded)}
+                  className="flex w-full items-center gap-1 px-5 py-1 text-[11px] font-medium text-[#6d6e6f] hover:text-[#1e1f21]"
+                >
+                  <ChevronRight className={cn("h-3 w-3 transition-transform", projectsExpanded && "rotate-90")} />
+                  Projects
+                </button>
+                {projectsExpanded && (
+                  <ul className="space-y-0.5">
+                    {(sortOrder === "alphabetical"
+                      ? [...(projects || [])].sort((a, b) => a.name.localeCompare(b.name))
+                      : projects
+                    )?.map((project) => (
+                      <li key={project.id}>
+                        <Link
+                          href={`/projects/${project.id}`}
+                          className={cn(
+                            "flex items-center gap-3 rounded-md px-6 py-1.5 text-sm transition-colors",
+                            pathname === `/projects/${project.id}`
+                              ? "bg-[#f1ece4] text-[#1e1f21]"
+                              : "text-[#6d6e6f] hover:bg-[#f1ece4]/60 hover:text-[#1e1f21]"
+                          )}
+                        >
+                          <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: project.color }} />
+                          <span className="truncate">{project.name}</span>
+                        </Link>
+                      </li>
+                    ))}
+                    {(!projects || projects.length === 0) && (
+                      <li className="px-6 py-1.5 text-xs text-muted-foreground">No projects yet</li>
+                    )}
+                  </ul>
                 )}
-              </ul>
+
+                {/* Portfolios sub-section */}
+                <button
+                  onClick={() => setPortfoliosExpanded(!portfoliosExpanded)}
+                  className="flex w-full items-center gap-1 px-5 py-1 text-[11px] font-medium text-[#6d6e6f] hover:text-[#1e1f21] mt-1"
+                >
+                  <ChevronRight className={cn("h-3 w-3 transition-transform", portfoliosExpanded && "rotate-90")} />
+                  Portfolios
+                </button>
+                {portfoliosExpanded && (
+                  <ul className="space-y-0.5">
+                    {portfolios?.map((portfolio) => (
+                      <li key={portfolio.id}>
+                        <Link
+                          href={`/portfolios/${portfolio.id}`}
+                          className="flex items-center gap-3 rounded-md px-6 py-1.5 text-sm text-[#6d6e6f] hover:bg-[#f1ece4]/60 hover:text-[#1e1f21]"
+                        >
+                          <Briefcase className="h-3 w-3" />
+                          <span className="truncate">{portfolio.name}</span>
+                        </Link>
+                      </li>
+                    ))}
+                    {(!portfolios || portfolios.length === 0) && (
+                      <li className="px-6 py-1.5 text-xs text-muted-foreground">No portfolios yet</li>
+                    )}
+                  </ul>
+                )}
+              </div>
             )}
           </div>
 

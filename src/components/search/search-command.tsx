@@ -154,11 +154,19 @@ export function SearchCommand() {
                   />
                   <div className="flex flex-1 items-center justify-between">
                     <span>{project.name}</span>
-                    {project.team && (
-                      <span className="text-xs text-muted-foreground">
-                        {project.team.name}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {(project as any).isArchived && (
+                        <span className="flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          <Archive className="h-2.5 w-2.5" />
+                          Archived
+                        </span>
+                      )}
+                      {project.team && (
+                        <span className="text-xs text-muted-foreground">
+                          {project.team.name}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </CommandItem>
               ))}
