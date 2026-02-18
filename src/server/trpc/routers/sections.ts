@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { realtime, REALTIME_EVENTS } from "../../services/realtime";
+import { verifyProjectAccess } from "../../services/authorization";
 
 export const sectionsRouter = router({
   list: protectedProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
       return ctx.prisma.section.findMany({
         where: { projectId: input.projectId },
         orderBy: { position: "asc" },
@@ -20,6 +22,7 @@ export const sectionsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
       // Get the max position to append at the end
       const lastSection = await ctx.prisma.section.findFirst({
         where: { projectId: input.projectId },
@@ -50,6 +53,9 @@ export const sectionsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // Verify access via the section's project
+      const existing = await ctx.prisma.section.findUniqueOrThrow({ where: { id: input.id }, select: { projectId: true } });
+      await verifyProjectAccess(ctx.prisma, existing.projectId, ctx.session.user.id);
       const section = await ctx.prisma.section.update({
         where: { id: input.id },
         data: { name: input.name },
@@ -65,6 +71,9 @@ export const sectionsRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const section = await ctx.prisma.section.findUnique({ where: { id: input.id }, select: { projectId: true } });
+      if (section) {
+        await verifyProjectAccess(ctx.prisma, section.projectId, ctx.session.user.id);
+      }
       const result = await ctx.prisma.section.delete({
         where: { id: input.id },
       });
@@ -85,6 +94,7 @@ export const sectionsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
       const updates = input.sectionIds.map((id, index) =>
         ctx.prisma.section.update({
           where: { id },

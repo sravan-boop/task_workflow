@@ -3,6 +3,7 @@ import { Prisma } from "../../../../prisma/generated/prisma/client";
 import { router, protectedProcedure } from "../trpc";
 import { executeRules } from "../../services/rules-engine";
 import { realtime, REALTIME_EVENTS } from "../../services/realtime";
+import { verifyProjectAccess, verifyTaskAccess } from "../../services/authorization";
 
 function calculateNextDueDate(
   currentDueDate: Date | null,
@@ -53,6 +54,7 @@ export const tasksRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
       return ctx.prisma.task.findMany({
         where: {
           taskProjects: {
@@ -82,6 +84,7 @@ export const tasksRouter = router({
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.id, ctx.session.user.id);
       return ctx.prisma.task.findUniqueOrThrow({
         where: { id: input.id },
         include: {
@@ -317,6 +320,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.id, ctx.session.user.id);
       const { id, ...data } = input;
 
       const task = await ctx.prisma.task.update({
@@ -364,6 +368,7 @@ export const tasksRouter = router({
   complete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.id, ctx.session.user.id);
       const completedTask = await ctx.prisma.task.update({
         where: { id: input.id },
         data: {
@@ -504,6 +509,7 @@ export const tasksRouter = router({
   uncomplete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.id, ctx.session.user.id);
       const task = await ctx.prisma.task.update({
         where: { id: input.id },
         data: {
@@ -518,6 +524,7 @@ export const tasksRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.id, ctx.session.user.id);
       // Get workspaceId before deleting
       const taskMeta = await ctx.prisma.task.findUnique({ where: { id: input.id }, select: { workspaceId: true } });
       // Use a transaction to delete subtasks first, then the task
@@ -552,6 +559,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.taskId, ctx.session.user.id);
       const result = await ctx.prisma.taskProject.updateMany({
         where: {
           taskId: input.taskId,
@@ -596,6 +604,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.taskId, ctx.session.user.id);
       return ctx.prisma.task.update({
         where: { id: input.taskId },
         data: {
@@ -613,6 +622,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.taskId, ctx.session.user.id);
       return ctx.prisma.taskDependency.create({
         data: {
           taskId: input.taskId,
@@ -630,6 +640,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.taskId, ctx.session.user.id);
       return ctx.prisma.taskDependency.create({
         data: {
           taskId: input.blocksTaskId,
@@ -656,6 +667,8 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.taskId, ctx.session.user.id);
+      await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
       return ctx.prisma.taskProject.create({
         data: {
           taskId: input.taskId,
@@ -674,6 +687,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.taskId, ctx.session.user.id);
       return ctx.prisma.taskProject.deleteMany({
         where: {
           taskId: input.taskId,
@@ -685,6 +699,7 @@ export const tasksRouter = router({
   duplicate: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.id, ctx.session.user.id);
       const source = await ctx.prisma.task.findUniqueOrThrow({
         where: { id: input.id },
         include: {
@@ -748,6 +763,10 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // Verify access to all tasks
+      for (const taskId of input.taskIds) {
+        await verifyTaskAccess(ctx.prisma, taskId, ctx.session.user.id);
+      }
       const { taskIds, ...data } = input;
       const updateData: Record<string, unknown> = {};
       if (data.assigneeId !== undefined) updateData.assigneeId = data.assigneeId;
@@ -767,6 +786,9 @@ export const tasksRouter = router({
   bulkDelete: protectedProcedure
     .input(z.object({ taskIds: z.array(z.string()).min(1) }))
     .mutation(async ({ ctx, input }) => {
+      for (const taskId of input.taskIds) {
+        await verifyTaskAccess(ctx.prisma, taskId, ctx.session.user.id);
+      }
       return ctx.prisma.$transaction(async (tx) => {
         // Delete subtasks of all selected tasks first
         await tx.task.deleteMany({
@@ -787,6 +809,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
       return ctx.prisma.taskProject.updateMany({
         where: {
           taskId: { in: input.taskIds },
@@ -804,6 +827,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.id, ctx.session.user.id);
       return ctx.prisma.task.update({
         where: { id: input.id },
         data: { isMilestone: input.isMilestone },
@@ -818,6 +842,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.id, ctx.session.user.id);
       return ctx.prisma.task.update({
         where: { id: input.id },
         data: {
@@ -835,6 +860,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.taskId, ctx.session.user.id);
       const follower = await ctx.prisma.taskFollower.create({
         data: {
           taskId: input.taskId,
@@ -872,6 +898,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.taskId, ctx.session.user.id);
       return ctx.prisma.taskFollower.deleteMany({
         where: {
           taskId: input.taskId,
@@ -888,6 +915,7 @@ export const tasksRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.id, ctx.session.user.id);
       return ctx.prisma.task.update({
         where: { id: input.id },
         data: { approvalStatus: input.approvalStatus },

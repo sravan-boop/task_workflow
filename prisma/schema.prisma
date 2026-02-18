@@ -52,6 +52,7 @@ model User {
   ownedGoals           Goal[]             @relation("GoalOwner")
   createdProjects      Project[]          @relation("ProjectCreator")
   portfolioMemberships PortfolioMember[]
+  projectMemberships   ProjectMember[]
 }
 
 model Account {
@@ -229,6 +230,7 @@ model ProjectMember {
   permission ProjectPermission @default(EDITOR)
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, userId])
 }

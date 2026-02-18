@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
 import { realtime, REALTIME_EVENTS } from "../../services/realtime";
 
@@ -54,6 +55,29 @@ export const goalsRouter = router({
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
+      // Verify user has access: owner, PUBLIC, or TEAM_ONLY for user's teams
+      const userId = ctx.session.user.id;
+      const userTeams = await ctx.prisma.teamMember.findMany({
+        where: { userId },
+        select: { teamId: true },
+      });
+      const userTeamIds = userTeams.map((t) => t.teamId);
+      const accessCheck = await ctx.prisma.goal.findFirst({
+        where: {
+          id: input.id,
+          OR: [
+            { ownerId: userId },
+            { privacy: "PUBLIC" },
+            ...(userTeamIds.length > 0
+              ? [{ privacy: "TEAM_ONLY" as const, teamId: { in: userTeamIds } }]
+              : []),
+          ],
+        },
+        select: { id: true },
+      });
+      if (!accessCheck) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "You don't have access to this goal" });
+      }
       return ctx.prisma.goal.findUniqueOrThrow({
         where: { id: input.id },
         include: {

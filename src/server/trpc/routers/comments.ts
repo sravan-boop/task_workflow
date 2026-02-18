@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { realtime, REALTIME_EVENTS } from "../../services/realtime";
+import { verifyTaskAccess } from "../../services/authorization";
 
 export const commentsRouter = router({
   list: protectedProcedure
     .input(z.object({ taskId: z.string() }))
     .query(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.taskId, ctx.session.user.id);
       return ctx.prisma.comment.findMany({
         where: { taskId: input.taskId },
         include: { author: true },
@@ -23,6 +25,7 @@ export const commentsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyTaskAccess(ctx.prisma, input.taskId, ctx.session.user.id);
       const comment = await ctx.prisma.comment.create({
         data: {
           taskId: input.taskId,
@@ -104,15 +107,20 @@ export const commentsRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const comment = await ctx.prisma.comment.findUnique({ where: { id: input.id }, select: { taskId: true } });
+      // Only allow deleting own comments
+      const comment = await ctx.prisma.comment.findUnique({ where: { id: input.id }, select: { taskId: true, authorId: true } });
+      if (!comment) {
+        throw new Error("Comment not found");
+      }
+      if (comment.authorId !== ctx.session.user.id) {
+        await verifyTaskAccess(ctx.prisma, comment.taskId, ctx.session.user.id);
+      }
       const result = await ctx.prisma.comment.delete({
         where: { id: input.id },
       });
-      if (comment) {
-        const task = await ctx.prisma.task.findUnique({ where: { id: comment.taskId }, select: { workspaceId: true } });
-        if (task) {
-          realtime.publish({ type: REALTIME_EVENTS.COMMENT_DELETED, workspaceId: task.workspaceId, data: { taskId: comment.taskId, commentId: input.id } });
-        }
+      const task = await ctx.prisma.task.findUnique({ where: { id: comment.taskId }, select: { workspaceId: true } });
+      if (task) {
+        realtime.publish({ type: REALTIME_EVENTS.COMMENT_DELETED, workspaceId: task.workspaceId, data: { taskId: comment.taskId, commentId: input.id } });
       }
       return result;
     }),

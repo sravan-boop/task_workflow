@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { realtime, REALTIME_EVENTS } from "../../services/realtime";
+import { verifyProjectAccess } from "../../services/authorization";
 
 export const projectsRouter = router({
   list: protectedProcedure
@@ -59,6 +60,7 @@ export const projectsRouter = router({
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.id, ctx.session.user.id);
       return ctx.prisma.project.findUniqueOrThrow({
         where: { id: input.id },
         include: {
@@ -139,6 +141,7 @@ export const projectsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.id, ctx.session.user.id);
       const { id, ...data } = input;
       const project = await ctx.prisma.project.update({
         where: { id },
@@ -151,6 +154,7 @@ export const projectsRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.id, ctx.session.user.id);
       const proj = await ctx.prisma.project.findUnique({ where: { id: input.id }, select: { workspaceId: true } });
       await ctx.prisma.visitHistory.deleteMany({
         where: { resourceType: "project", resourceId: input.id },
@@ -167,6 +171,7 @@ export const projectsRouter = router({
   archive: protectedProcedure
     .input(z.object({ id: z.string(), isArchived: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.id, ctx.session.user.id);
       const project = await ctx.prisma.project.update({
         where: { id: input.id },
         data: { isArchived: input.isArchived },
@@ -288,6 +293,7 @@ export const projectsRouter = router({
   getTasksForExport: protectedProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
       return ctx.prisma.task.findMany({
         where: {
           taskProjects: { some: { projectId: input.projectId } },
@@ -308,6 +314,7 @@ export const projectsRouter = router({
   statusUpdates: protectedProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
       return ctx.prisma.statusUpdate.findMany({
         where: { projectId: input.projectId },
         include: { author: true },
@@ -326,6 +333,7 @@ export const projectsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
       return ctx.prisma.statusUpdate.create({
         data: {
           projectId: input.projectId,
@@ -347,6 +355,7 @@ export const projectsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
       return ctx.prisma.projectMember.upsert({
         where: {
           projectId_userId: {
@@ -366,8 +375,10 @@ export const projectsRouter = router({
   getMembers: protectedProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {
+      await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
       return ctx.prisma.projectMember.findMany({
         where: { projectId: input.projectId },
+        include: { user: { select: { id: true, name: true, email: true } } },
       });
     }),
 });
