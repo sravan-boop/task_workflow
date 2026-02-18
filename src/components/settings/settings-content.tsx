@@ -300,6 +300,7 @@ export function SettingsContent() {
     trpc.notifications.getPreferences.useQuery();
   const updatePrefsMutation = trpc.notifications.updatePreferences.useMutation({
     onSuccess: () => {
+      utils.notifications.getPreferences.invalidate();
       toast.success("Notification preferences saved");
     },
     onError: () => {
@@ -351,8 +352,10 @@ export function SettingsContent() {
     onError: () => toast.error("Failed to update language"),
   });
 
+  const utils = trpc.useUtils();
   const updateProfile = trpc.auth.updateProfile.useMutation({
     onSuccess: () => {
+      utils.auth.getProfile.invalidate();
       toast.success("Profile updated successfully");
       updateSession();
     },

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
+import { realtime, REALTIME_EVENTS } from "../../services/realtime";
 
 export const projectsRouter = router({
   list: protectedProcedure
@@ -15,6 +16,10 @@ export const projectsRouter = router({
           workspaceId: input.workspaceId,
           ...(input.teamId && { teamId: input.teamId }),
           isArchived: false,
+          OR: [
+            { createdById: ctx.session.user.id },
+            { members: { some: { userId: ctx.session.user.id } } },
+          ],
         },
         include: {
           team: true,
@@ -36,6 +41,10 @@ export const projectsRouter = router({
       return ctx.prisma.project.findMany({
         where: {
           workspaceId: input.workspaceId,
+          OR: [
+            { createdById: ctx.session.user.id },
+            { members: { some: { userId: ctx.session.user.id } } },
+          ],
         },
         include: {
           team: true,
@@ -73,6 +82,7 @@ export const projectsRouter = router({
         color: z.string().default("#4573D2"),
         privacy: z.enum(["PUBLIC", "PRIVATE", "SPECIFIC_MEMBERS"]).default("PUBLIC"),
         defaultView: z.enum(["LIST", "BOARD", "TIMELINE", "CALENDAR"]).default("LIST"),
+        skipDefaultSections: z.boolean().default(false),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -86,16 +96,18 @@ export const projectsRouter = router({
           workspaceId: input.workspaceId,
           teamId: input.teamId,
           createdById: ctx.session.user.id,
-          // Create default sections
-          sections: {
-            createMany: {
-              data: [
-                { name: "To do", position: 1 },
-                { name: "In progress", position: 2 },
-                { name: "Done", position: 3 },
-              ],
+          // Create default sections unless skipped (e.g. when using a template)
+          ...(!input.skipDefaultSections && {
+            sections: {
+              createMany: {
+                data: [
+                  { name: "To do", position: 1 },
+                  { name: "In progress", position: 2 },
+                  { name: "Done", position: 3 },
+                ],
+              },
             },
-          },
+          }),
           // Add creator as project admin
           members: {
             create: {
@@ -109,6 +121,8 @@ export const projectsRouter = router({
           team: true,
         },
       });
+
+      realtime.publish({ type: REALTIME_EVENTS.PROJECT_CREATED, workspaceId: input.workspaceId, data: { projectId: project.id } });
 
       return project;
     }),
@@ -126,31 +140,39 @@ export const projectsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      return ctx.prisma.project.update({
+      const project = await ctx.prisma.project.update({
         where: { id },
         data,
       });
+      realtime.publish({ type: REALTIME_EVENTS.PROJECT_UPDATED, workspaceId: project.workspaceId, data: { projectId: project.id } });
+      return project;
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      // Also remove from visit history so recents update
+      const proj = await ctx.prisma.project.findUnique({ where: { id: input.id }, select: { workspaceId: true } });
       await ctx.prisma.visitHistory.deleteMany({
         where: { resourceType: "project", resourceId: input.id },
       });
-      return ctx.prisma.project.delete({
+      const result = await ctx.prisma.project.delete({
         where: { id: input.id },
       });
+      if (proj) {
+        realtime.publish({ type: REALTIME_EVENTS.PROJECT_DELETED, workspaceId: proj.workspaceId, data: { projectId: input.id } });
+      }
+      return result;
     }),
 
   archive: protectedProcedure
     .input(z.object({ id: z.string(), isArchived: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.project.update({
+      const project = await ctx.prisma.project.update({
         where: { id: input.id },
         data: { isArchived: input.isArchived },
       });
+      realtime.publish({ type: REALTIME_EVENTS.PROJECT_UPDATED, workspaceId: project.workspaceId, data: { projectId: project.id } });
+      return project;
     }),
 
   duplicate: protectedProcedure
@@ -298,7 +320,7 @@ export const projectsRouter = router({
     .input(
       z.object({
         projectId: z.string(),
-        status: z.enum(["ON_TRACK", "AT_RISK", "OFF_TRACK", "ON_HOLD", "COMPLETE"]),
+        status: z.enum(["ON_TRACK", "AT_RISK", "OFF_TRACK", "ON_HOLD", "COMPLETE", "DROPPED"]),
         title: z.string().min(1).max(200),
         body: z.string(),
       })
@@ -313,6 +335,39 @@ export const projectsRouter = router({
           body: input.body,
         },
         include: { author: true },
+      });
+    }),
+
+  addMember: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        userId: z.string(),
+        permission: z.enum(["ADMIN", "EDITOR", "COMMENTER", "VIEWER"]).default("EDITOR"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.prisma.projectMember.upsert({
+        where: {
+          projectId_userId: {
+            projectId: input.projectId,
+            userId: input.userId,
+          },
+        },
+        update: { permission: input.permission },
+        create: {
+          projectId: input.projectId,
+          userId: input.userId,
+          permission: input.permission,
+        },
+      });
+    }),
+
+  getMembers: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.prisma.projectMember.findMany({
+        where: { projectId: input.projectId },
       });
     }),
 });

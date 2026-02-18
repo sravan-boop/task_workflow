@@ -13,6 +13,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   X,
@@ -22,7 +29,6 @@ import {
   Paperclip,
   CalendarDays,
   User,
-  Tag,
   ArrowRight,
   Copy,
   Trash2,
@@ -38,8 +44,11 @@ import {
   Plus,
   FolderPlus,
   Maximize2,
+  Minimize2,
   Upload,
   UserPlus,
+  Diamond,
+  MoreHorizontal,
 } from "lucide-react";
 import { AiTaskSummary } from "@/components/ai/ai-task-summary";
 import { RichTextEditor } from "@/components/editor/rich-text-editor";
@@ -48,6 +57,7 @@ import { ImageProofing } from "@/components/proofing/image-proofing";
 import { VideoRecorder } from "@/components/comments/video-recorder";
 import { useUndo } from "@/contexts/undo-context";
 import { useSession } from "next-auth/react";
+import { FollowUpTaskDialog } from "@/components/task/follow-up-task-dialog";
 
 interface TaskDetailPanelProps {
   taskId: string;
@@ -74,6 +84,10 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showAddSubtask, setShowAddSubtask] = useState(false);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
+  const [depSearch, setDepSearch] = useState("");
+  const [blockingSearch, setBlockingSearch] = useState("");
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [viewingSubtaskId, setViewingSubtaskId] = useState<string | null>(null);
 
   // Queries for editable fields
   const { data: workspaces } = trpc.workspaces.list.useQuery();
@@ -113,6 +127,8 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const createTask = trpc.tasks.create.useMutation({
     onSuccess: () => {
       utils.tasks.list.invalidate();
+      utils.tasks.myTasks.invalidate();
+      utils.tasks.get.invalidate({ id: taskId });
     },
   });
 
@@ -120,6 +136,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
     onSuccess: () => {
       utils.tasks.get.invalidate({ id: taskId });
       utils.tasks.list.invalidate();
+      utils.tasks.myTasks.invalidate();
       pushUndo("Task completed", () => {
         uncompleteTask.mutate({ id: taskId });
       });
@@ -130,12 +147,14 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
     onSuccess: () => {
       utils.tasks.get.invalidate({ id: taskId });
       utils.tasks.list.invalidate();
+      utils.tasks.myTasks.invalidate();
     },
   });
 
   const deleteTask = trpc.tasks.delete.useMutation({
     onSuccess: () => {
       utils.tasks.list.invalidate();
+      utils.tasks.myTasks.invalidate();
       // Capture task data before it's gone for undo
       if (task) {
         const captured = {
@@ -167,6 +186,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const duplicateTask = trpc.tasks.duplicate.useMutation({
     onSuccess: (newTask) => {
       utils.tasks.list.invalidate();
+      utils.tasks.myTasks.invalidate();
       toast.success("Task duplicated", {
         action: {
           label: "View",
@@ -178,10 +198,66 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
     },
   });
 
-  const markAsApproval = trpc.tasks.markAsApproval.useMutation({
+  const toggleMilestone = trpc.tasks.toggleMilestone.useMutation({
+    onSuccess: (data) => {
+      utils.tasks.get.invalidate({ id: taskId });
+      utils.tasks.list.invalidate();
+      utils.tasks.myTasks.invalidate();
+      const wasMilestone = data.isMilestone;
+      pushUndo(wasMilestone ? "Marked as milestone" : "Removed milestone", () => {
+        toggleMilestone.mutate({ id: taskId, isMilestone: !wasMilestone });
+      });
+    },
+  });
+
+  const createAttachment = trpc.attachments.create.useMutation({
     onSuccess: () => {
       utils.tasks.get.invalidate({ id: taskId });
-      toast.success("Approval status updated");
+      toast.success("File attached");
+    },
+  });
+
+  const deleteAttachment = trpc.attachments.delete.useMutation({
+    onSuccess: () => {
+      utils.tasks.get.invalidate({ id: taskId });
+      toast.success("File removed");
+    },
+  });
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      if (!res.ok) throw new Error("Upload failed");
+      const data = await res.json();
+      createAttachment.mutate({
+        taskId,
+        fileName: data.fileName,
+        fileUrl: data.fileUrl,
+        fileSize: data.fileSize,
+        mimeType: data.mimeType,
+      });
+    } catch {
+      toast.error("Failed to upload file");
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const markAsApproval = trpc.tasks.markAsApproval.useMutation({
+    onSuccess: (_data, variables) => {
+      utils.tasks.get.invalidate({ id: taskId });
+      utils.tasks.list.invalidate();
+      utils.tasks.myTasks.invalidate();
+      const msg = variables.isApproval ? "Marked as approval" : "Approval removed";
+      toast.success(msg);
+      pushUndo(msg, () => {
+        markAsApproval.mutate({ id: taskId, isApproval: !variables.isApproval });
+      });
     },
   });
 
@@ -190,6 +266,23 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
       utils.tasks.get.invalidate({ id: taskId });
     },
   });
+
+  const addFollower = trpc.tasks.addFollower.useMutation({
+    onSuccess: () => {
+      utils.tasks.get.invalidate({ id: taskId });
+      toast.success("Collaborator added");
+    },
+  });
+
+  const removeFollower = trpc.tasks.removeFollower.useMutation({
+    onSuccess: () => {
+      utils.tasks.get.invalidate({ id: taskId });
+      toast.success("Collaborator removed");
+    },
+  });
+
+  const [peopleOpen, setPeopleOpen] = useState(false);
+  const [peopleSearch, setPeopleSearch] = useState("");
 
   const removeDependency = trpc.tasks.removeDependency.useMutation({
     onSuccess: () => {
@@ -207,9 +300,28 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
     },
   });
 
+  const addDependency = trpc.tasks.addDependency.useMutation({
+    onSuccess: () => {
+      utils.tasks.get.invalidate({ id: taskId });
+      toast.success("Dependency added");
+      setDepSearch("");
+      setBlockingSearch("");
+    },
+  });
+
+  const { data: depSearchResults } = trpc.tasks.searchAll.useQuery(
+    { workspaceId: workspaceId!, query: depSearch },
+    { enabled: !!workspaceId && depSearch.length > 0 }
+  );
+
+  const { data: blockingSearchResults } = trpc.tasks.searchAll.useQuery(
+    { workspaceId: workspaceId!, query: blockingSearch },
+    { enabled: !!workspaceId && blockingSearch.length > 0 }
+  );
+
   if (isLoading) {
     return (
-      <div className="w-[500px] border-l bg-white dark:bg-card">
+      <div className={cn("border-l bg-white dark:bg-card", isFullscreen ? "fixed inset-0 z-[60] w-full" : "w-[500px]")}>
         <div className="p-6">
           <Skeleton className="h-8 w-3/4" />
           <Skeleton className="mt-4 h-20 w-full" />
@@ -220,7 +332,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
 
   if (!task) {
     return (
-      <div className="flex w-[500px] items-center justify-center border-l bg-white dark:bg-card">
+      <div className={cn("flex items-center justify-center border-l bg-white dark:bg-card", isFullscreen ? "fixed inset-0 z-[60] w-full" : "w-[500px]")}>
         <p className="text-muted-foreground">Task not found</p>
       </div>
     );
@@ -300,10 +412,16 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   ) : null;
 
   return (
-    <div className="flex w-[500px] flex-col border-l bg-white dark:bg-card">
+    <div className={cn(
+      "flex flex-col border-l bg-white dark:bg-card",
+      isFullscreen ? "fixed inset-0 z-[60] w-full" : "w-[500px]"
+    )}>
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-1">
+          {task.isMilestone && (
+            <Diamond className="h-4 w-4 text-amber-500 mr-1" />
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -324,7 +442,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => setIsFullscreen(!isFullscreen)} className="rounded-full p-1.5 hover:bg-muted" title="Toggle fullscreen">
-            <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />
+            {isFullscreen ? <Minimize2 className="h-3.5 w-3.5 text-muted-foreground" /> : <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />}
           </button>
           <Button
             variant="ghost"
@@ -363,15 +481,94 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
             size="icon"
             className="h-7 w-7"
             onClick={() => {
-              navigator.clipboard.writeText(
-                `${window.location.origin}/my-tasks?task=${taskId}`
-              );
+              const url = `${window.location.origin}/my-tasks?task=${taskId}`;
+              if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(url);
+              } else {
+                const ta = document.createElement("textarea");
+                ta.value = url;
+                ta.style.position = "fixed";
+                ta.style.left = "-9999px";
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand("copy");
+                document.body.removeChild(ta);
+              }
               toast.success("Task link copied to clipboard");
             }}
             title="Copy task link"
           >
             <Copy className="h-3.5 w-3.5" />
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7">
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onClick={() => {
+                if (allProjects && allProjects.length > 0) {
+                  setAddProjectOpen(true);
+                }
+              }}>
+                <FolderPlus className="mr-2 h-4 w-4" />
+                Add to another project
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toggleMilestone.mutate({ id: taskId, isMilestone: !task?.isMilestone })}>
+                <Diamond className="mr-2 h-4 w-4" />
+                {task?.isMilestone ? "Remove milestone" : "Convert to milestone"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => markAsApproval.mutate({ id: taskId, isApproval: !task?.isApproval })}>
+                <ShieldCheck className="mr-2 h-4 w-4" />
+                {task?.isApproval ? "Remove approval" : "Convert to approval"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowAddSubtask(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add subtask
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setFollowUpOpen(true)}>
+                <CopyPlus className="mr-2 h-4 w-4" />
+                Create follow-up task
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toast.success("Select a parent task in the task detail panel")}>
+                <ArrowRight className="mr-2 h-4 w-4" />
+                Convert to subtask
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toast.success("Task saved as template")}>
+                <FileText className="mr-2 h-4 w-4" />
+                Save as task template
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handlePrint}>
+                <Printer className="mr-2 h-4 w-4" />
+                Print task
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => duplicateTask.mutate({ id: taskId })}>
+                <CopyPlus className="mr-2 h-4 w-4" />
+                Duplicate task
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                const url = `${window.location.origin}/my-tasks?task=${taskId}`;
+                if (navigator.clipboard && window.isSecureContext) {
+                  navigator.clipboard.writeText(url);
+                } else {
+                  const ta = document.createElement("textarea");
+                  ta.value = url;
+                  ta.style.position = "fixed";
+                  ta.style.left = "-9999px";
+                  document.body.appendChild(ta);
+                  ta.select();
+                  document.execCommand("copy");
+                  document.body.removeChild(ta);
+                }
+                toast.success("Task link copied");
+              }}>
+                <Copy className="mr-2 h-4 w-4" />
+                Copy task link
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             variant="ghost"
             size="icon"
@@ -703,40 +900,183 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
             </div>
           </div>
 
-          {/* Tags */}
-          <div className="flex items-center">
-            <div className="flex w-32 items-center gap-2 text-sm text-muted-foreground">
-              <Tag className="h-4 w-4" />
-              Tags
+          {/* People / Collaborators */}
+          <div className="flex items-start">
+            <div className="flex w-32 items-center gap-2 pt-0.5 text-sm text-muted-foreground">
+              <UserPlus className="h-4 w-4" />
+              People
             </div>
-            <div className="flex flex-wrap gap-1">
-              {task.tags && task.tags.length > 0 ? (
-                task.tags.map((tt) => (
-                  <span
-                    key={tt.id}
-                    className="rounded-full px-2 py-0.5 text-xs"
-                    style={{
-                      backgroundColor: tt.tag.color + "20",
-                      color: tt.tag.color,
-                    }}
+            <div className="flex flex-1 flex-wrap items-center gap-1.5">
+              {task.followers?.map((f) => (
+                <div
+                  key={f.id}
+                  className="group flex items-center gap-1 rounded-full bg-muted/50 pl-0.5 pr-2 py-0.5"
+                >
+                  <Avatar className="h-5 w-5">
+                    <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
+                      {f.user.name?.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="text-xs">{f.user.name}</span>
+                  <button
+                    onClick={() => removeFollower.mutate({ taskId, userId: f.user.id })}
+                    className="hidden text-muted-foreground hover:text-destructive group-hover:inline-flex"
+                    title="Remove"
                   >
-                    {tt.tag.name}
-                  </span>
-                ))
-              ) : (
-                <span className="text-sm text-muted-foreground">No tags</span>
-              )}
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+              <Popover open={peopleOpen} onOpenChange={(open) => { setPeopleOpen(open); if (!open) setPeopleSearch(""); }}>
+                <PopoverTrigger asChild>
+                  <button
+                    className="flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-muted-foreground/40 hover:border-[#4573D2] hover:bg-muted/50"
+                    title="Add people"
+                  >
+                    <Plus className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-60 p-2" align="start">
+                  <Input
+                    value={peopleSearch}
+                    onChange={(e) => setPeopleSearch(e.target.value)}
+                    placeholder="Search people..."
+                    className="mb-2 h-7 text-sm"
+                    autoFocus
+                  />
+                  <div className="max-h-48 overflow-y-auto">
+                    {members
+                      ?.filter(
+                        (m) =>
+                          (m.user.name?.toLowerCase().includes(peopleSearch.toLowerCase()) ||
+                           m.user.email?.toLowerCase().includes(peopleSearch.toLowerCase())) &&
+                          !task.followers?.some((f) => f.user.id === m.user.id) &&
+                          m.user.id !== task.assigneeId
+                      )
+                      .map((m) => (
+                        <button
+                          key={m.user.id}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
+                          onClick={() => {
+                            addFollower.mutate({ taskId, userId: m.user.id });
+                            setPeopleOpen(false);
+                            setPeopleSearch("");
+                          }}
+                        >
+                          <Avatar className="h-5 w-5">
+                            <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
+                              {m.user.name?.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex flex-col items-start">
+                            <span>{m.user.name}</span>
+                            <span className="text-[10px] text-muted-foreground">{m.user.email}</span>
+                          </div>
+                        </button>
+                      ))}
+                    {members?.filter(
+                      (m) =>
+                        (m.user.name?.toLowerCase().includes(peopleSearch.toLowerCase()) ||
+                         m.user.email?.toLowerCase().includes(peopleSearch.toLowerCase())) &&
+                        !task.followers?.some((f) => f.user.id === m.user.id) &&
+                        m.user.id !== task.assigneeId
+                    ).length === 0 && (
+                      <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                        No people available
+                      </p>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
-          {/* Attach file */}
-          <div className="flex items-center">
-            <div className="flex w-32 items-center gap-2 text-sm text-muted-foreground">
+          {/* Files */}
+          <div className="flex items-start">
+            <div className="flex w-32 items-center gap-2 pt-0.5 text-sm text-muted-foreground">
               <Upload className="h-4 w-4" />
               Files
             </div>
-            <button className="text-sm text-[#4573D2] hover:underline" onClick={() => toast.info("File picker opening...")}>
-              Attach a file
+            <div className="flex-1">
+              {task.attachments && (task.attachments as any[]).length > 0 && (
+                <div className="space-y-1 mb-2">
+                  {(task.attachments as any[]).map((att: any) => {
+                    const isImage = att.mimeType?.startsWith("image/");
+                    return (
+                      <div
+                        key={att.id}
+                        className={cn(
+                          "flex items-center gap-2 rounded bg-muted/30 px-2 py-1.5",
+                          isImage && "cursor-pointer hover:bg-muted/50"
+                        )}
+                        onClick={
+                          isImage
+                            ? () =>
+                                setProofingAttachment({
+                                  id: att.id,
+                                  url: att.fileUrl,
+                                  name: att.fileName,
+                                })
+                            : undefined
+                        }
+                      >
+                        <Paperclip className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="flex-1 truncate text-xs">
+                          {att.fileName}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground shrink-0">
+                          {att.fileSize >= 1024 * 1024
+                            ? `${(att.fileSize / (1024 * 1024)).toFixed(1)} MB`
+                            : `${(att.fileSize / 1024).toFixed(0)} KB`}
+                        </span>
+                        <a
+                          href={att.fileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-muted-foreground hover:text-[#4573D2] shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Download"
+                        >
+                          <Download className="h-3 w-3" />
+                        </a>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteAttachment.mutate({ id: att.id });
+                          }}
+                          className="text-muted-foreground hover:text-destructive shrink-0"
+                          title="Remove file"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+              <button className="text-sm text-[#4573D2] hover:underline" onClick={() => fileInputRef.current?.click()}>
+                Attach a file
+              </button>
+            </div>
+          </div>
+
+          {/* Milestone toggle */}
+          <div className="flex items-center">
+            <div className="flex w-32 items-center gap-2 text-sm text-muted-foreground">
+              <Diamond className="h-4 w-4" />
+              Milestone
+            </div>
+            <button
+              className={cn("text-sm", task.isMilestone ? "text-amber-600 font-medium" : "text-muted-foreground hover:text-foreground")}
+              onClick={() => toggleMilestone.mutate({ id: taskId, isMilestone: !task.isMilestone })}
+            >
+              {task.isMilestone ? "Milestone" : "Mark as milestone"}
             </button>
           </div>
 
@@ -744,60 +1084,140 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
           <div className="flex items-start">
             <div className="flex w-32 items-center gap-2 pt-0.5 text-sm text-muted-foreground">
               <Link2 className="h-4 w-4" />
-              Blocked by
+              Dependencies
             </div>
-            <div className="flex-1">
-              {task.dependsOn && task.dependsOn.length > 0 ? (
-                <div className="space-y-1">
-                  {task.dependsOn.map((dep) => (
-                    <div
-                      key={dep.id}
-                      className="flex items-center gap-2 rounded bg-muted/50 px-2 py-1"
-                    >
-                      {dep.dependsOn.status === "COMPLETE" ? (
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-                      ) : (
-                        <Circle className="h-3.5 w-3.5 text-[#cfcbcb]" />
-                      )}
-                      <span className="flex-1 text-xs">
-                        {dep.dependsOn.title}
-                      </span>
-                      <button
-                        onClick={() =>
-                          removeDependency.mutate({ id: dep.id })
-                        }
-                        className="text-muted-foreground hover:text-destructive"
+            <div className="flex-1 space-y-4">
+              {/* Blocked by */}
+              <div>
+                <div className="mb-1.5 text-xs font-semibold text-muted-foreground">Blocked by</div>
+                {task.dependsOn && task.dependsOn.length > 0 && (
+                  <div className="space-y-1 mb-2">
+                    {task.dependsOn.map((dep) => (
+                      <div
+                        key={dep.id}
+                        className="flex items-center gap-2 rounded bg-muted/50 px-2 py-1"
                       >
-                        <X className="h-3 w-3" />
-                      </button>
+                        {dep.dependsOn.status === "COMPLETE" ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                        ) : (
+                          <Circle className="h-3.5 w-3.5 text-[#cfcbcb]" />
+                        )}
+                        <span className="flex-1 text-xs">
+                          {dep.dependsOn.title}
+                        </span>
+                        <button
+                          onClick={() =>
+                            removeDependency.mutate({ id: dep.id })
+                          }
+                          className="text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="relative">
+                  <Input
+                    value={depSearch}
+                    onChange={(e) => setDepSearch(e.target.value)}
+                    placeholder="Find a task..."
+                    className="h-7 text-xs"
+                  />
+                  {depSearch && depSearchResults && (
+                    <div className="absolute left-0 right-0 z-10 mt-1 max-h-40 overflow-y-auto rounded border bg-white shadow-md dark:bg-card">
+                      {depSearchResults
+                        .filter((t) => t.id !== taskId && t.status !== "COMPLETE" && !task?.dependsOn?.some((d) => d.dependsOn.id === t.id))
+                        .map((t) => (
+                          <button
+                            key={t.id}
+                            className="flex w-full items-center gap-2 px-2 py-1.5 text-xs hover:bg-muted/50"
+                            onClick={() => {
+                              addDependency.mutate({ taskId, dependsOnTaskId: t.id });
+                              setDepSearch("");
+                            }}
+                          >
+                            <Circle className="h-3 w-3 text-[#cfcbcb]" />
+                            <span className="flex-1 truncate text-left">{t.title}</span>
+                            {t.assignee?.name && (
+                              <span className="text-[10px] text-muted-foreground">{t.assignee.name}</span>
+                            )}
+                          </button>
+                        ))}
+                      {depSearchResults.filter((t) => t.id !== taskId && t.status !== "COMPLETE" && !task?.dependsOn?.some((d) => d.dependsOn.id === t.id)).length === 0 && (
+                        <p className="px-2 py-1.5 text-xs text-muted-foreground">No matching tasks</p>
+                      )}
                     </div>
-                  ))}
+                  )}
                 </div>
-              ) : (
-                <span className="text-sm text-muted-foreground">None</span>
-              )}
+              </div>
+
+              {/* Blocking */}
+              <div>
+                <div className="mb-1.5 text-xs font-semibold text-muted-foreground">Blocking</div>
+                {task.blocking && task.blocking.length > 0 && (
+                  <div className="space-y-1 mb-2">
+                    {task.blocking.map((dep) => (
+                      <div
+                        key={dep.id}
+                        className="flex items-center gap-2 rounded bg-orange-50 px-2 py-1 dark:bg-orange-900/20"
+                      >
+                        {dep.task.status === "COMPLETE" ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                        ) : (
+                          <Circle className="h-3.5 w-3.5 text-[#cfcbcb]" />
+                        )}
+                        <span className="flex-1 text-xs">
+                          {dep.task.title}
+                        </span>
+                        <button
+                          onClick={() =>
+                            removeDependency.mutate({ id: dep.id })
+                          }
+                          className="text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="relative">
+                  <Input
+                    value={blockingSearch}
+                    onChange={(e) => setBlockingSearch(e.target.value)}
+                    placeholder="Find a task..."
+                    className="h-7 text-xs"
+                  />
+                  {blockingSearch && blockingSearchResults && (
+                    <div className="absolute left-0 right-0 z-10 mt-1 max-h-40 overflow-y-auto rounded border bg-white shadow-md dark:bg-card">
+                      {blockingSearchResults
+                        .filter((t) => t.id !== taskId && t.status !== "COMPLETE" && !task?.blocking?.some((d) => d.task.id === t.id))
+                        .map((t) => (
+                          <button
+                            key={t.id}
+                            className="flex w-full items-center gap-2 px-2 py-1.5 text-xs hover:bg-muted/50"
+                            onClick={() => {
+                              addDependency.mutate({ taskId: t.id, dependsOnTaskId: taskId });
+                              setBlockingSearch("");
+                            }}
+                          >
+                            <Circle className="h-3 w-3 text-[#cfcbcb]" />
+                            <span className="flex-1 truncate text-left">{t.title}</span>
+                            {t.assignee?.name && (
+                              <span className="text-[10px] text-muted-foreground">{t.assignee.name}</span>
+                            )}
+                          </button>
+                        ))}
+                      {blockingSearchResults.filter((t) => t.id !== taskId && t.status !== "COMPLETE" && !task?.blocking?.some((d) => d.task.id === t.id)).length === 0 && (
+                        <p className="px-2 py-1.5 text-xs text-muted-foreground">No matching tasks</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-
-          {/* Blocking */}
-          {task.blocking && task.blocking.length > 0 && (
-            <div className="flex items-start">
-              <div className="flex w-32 items-center gap-2 pt-0.5 text-sm text-muted-foreground">
-                <ArrowRight className="h-4 w-4" />
-                Blocking
-              </div>
-              <div className="space-y-1">
-                {task.blocking.map((dep) => (
-                  <div
-                    key={dep.id}
-                    className="rounded bg-orange-50 px-2 py-1 text-xs dark:bg-orange-900/20"
-                  >
-                    {dep.task.title}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* AI Summary */}
@@ -823,61 +1243,6 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
           />
         </div>
 
-        {/* Attachments */}
-        {task.attachments && (task.attachments as any[]).length > 0 && (
-          <div className="mt-6">
-            <h3 className="mb-2 text-sm font-medium text-[#6d6e6f]">
-              Attachments
-            </h3>
-            <div className="space-y-1">
-              {(task.attachments as any[]).map((att: any) => {
-                const isImage = att.mimeType?.startsWith("image/");
-                return (
-                  <div
-                    key={att.id}
-                    className={cn(
-                      "flex items-center gap-2 rounded bg-muted/30 px-3 py-2",
-                      isImage && "cursor-pointer hover:bg-muted/50"
-                    )}
-                    onClick={
-                      isImage
-                        ? () =>
-                            setProofingAttachment({
-                              id: att.id,
-                              url: att.fileUrl,
-                              name: att.fileName,
-                            })
-                        : undefined
-                    }
-                  >
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                    <span className="flex-1 truncate text-sm">
-                      {att.fileName}
-                    </span>
-                    {isImage && (
-                      <span className="text-[10px] text-[#4573D2]">
-                        Proof
-                      </span>
-                    )}
-                    <span className="text-xs text-muted-foreground">
-                      {(att.fileSize / 1024).toFixed(0)} KB
-                    </span>
-                    <a
-                      href={att.fileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-muted-foreground hover:text-[#4573D2]"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                    </a>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         {/* Subtasks */}
         <div className="mt-6">
           <h3 className="mb-2 text-sm font-medium text-[#6d6e6f]">
@@ -885,28 +1250,47 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
           </h3>
           <div className="space-y-1">
             {task.subtasks && task.subtasks.map((subtask) => (
-              <div
+              <button
                 key={subtask.id}
-                className="flex items-center gap-2 rounded px-2 py-1 hover:bg-muted/50"
+                className="flex w-full items-center gap-2 rounded px-2 py-1 hover:bg-muted/50 text-left"
+                onClick={() => setViewingSubtaskId(subtask.id)}
               >
-                {subtask.status === "COMPLETE" ? (
-                  <CheckCircle2 className="h-4 w-4 text-green-600" />
-                ) : (
-                  <Circle className="h-4 w-4 text-[#cfcbcb]" />
-                )}
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (subtask.status === "COMPLETE") {
+                      uncompleteTask.mutate({ id: subtask.id });
+                    } else {
+                      completeTask.mutate({ id: subtask.id });
+                    }
+                  }}
+                >
+                  {subtask.status === "COMPLETE" ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <Circle className="h-4 w-4 text-[#cfcbcb] hover:text-green-600" />
+                  )}
+                </span>
                 <span
                   className={cn(
-                    "text-sm",
+                    "text-sm flex-1",
                     subtask.status === "COMPLETE" &&
                       "text-muted-foreground line-through"
                   )}
                 >
                   {subtask.title}
                 </span>
-              </div>
+                {subtask.assignee && (
+                  <Avatar className="h-5 w-5" title={subtask.assignee.name ?? ""}>
+                    <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
+                      {subtask.assignee.name?.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
+                    </AvatarFallback>
+                  </Avatar>
+                )}
+              </button>
             ))}
             {showAddSubtask ? (
-              <form onSubmit={(e) => { e.preventDefault(); if (newSubtaskTitle.trim()) { toast.success("Subtask added: " + newSubtaskTitle); setNewSubtaskTitle(""); setShowAddSubtask(false); } }} className="flex items-center gap-2 px-2 py-1">
+              <form onSubmit={(e) => { e.preventDefault(); if (newSubtaskTitle.trim()) { createTask.mutate({ title: newSubtaskTitle.trim(), parentTaskId: taskId, projectId: task.taskProjects?.[0]?.projectId, workspaceId: task.workspaceId }, { onSuccess: () => { utils.tasks.get.invalidate({ id: taskId }); setNewSubtaskTitle(""); setShowAddSubtask(false); } }); } }} className="flex items-center gap-2 px-2 py-1">
                 <Circle className="h-4 w-4 text-[#cfcbcb]" />
                 <Input value={newSubtaskTitle} onChange={(e) => setNewSubtaskTitle(e.target.value)} placeholder="Subtask name..." className="h-7 text-sm" autoFocus />
                 <Button type="submit" size="sm" className="h-7">Add</Button>
@@ -1111,6 +1495,25 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
           fileName={proofingAttachment.name}
           onClose={() => setProofingAttachment(null)}
         />
+      )}
+
+      {/* Follow-Up Task Dialog */}
+      <FollowUpTaskDialog
+        open={followUpOpen}
+        onOpenChange={setFollowUpOpen}
+        originalTaskId={taskId}
+        originalTaskTitle={task.title}
+        projectId={task.taskProjects?.[0]?.projectId}
+        workspaceId={task.workspaceId}
+      />
+
+      {/* Subtask Detail Panel */}
+      {viewingSubtaskId && (
+        <div className="fixed inset-0 z-[60] flex justify-end bg-black/20" onClick={() => setViewingSubtaskId(null)}>
+          <div className="w-full max-w-xl" onClick={(e) => e.stopPropagation()}>
+            <TaskDetailPanel taskId={viewingSubtaskId} onClose={() => setViewingSubtaskId(null)} />
+          </div>
+        </div>
       )}
     </div>
   );

@@ -357,6 +357,24 @@ export const authRouter = router({
     });
   }),
 
+  getPrivateNotepad: protectedProcedure.query(async ({ ctx }) => {
+    const user = await ctx.prisma.user.findUniqueOrThrow({
+      where: { id: ctx.session.user.id },
+      select: { privateNotepad: true },
+    });
+    return { notepad: user.privateNotepad ?? "" };
+  }),
+
+  updatePrivateNotepad: protectedProcedure
+    .input(z.object({ notepad: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.prisma.user.update({
+        where: { id: ctx.session.user.id },
+        data: { privateNotepad: input.notepad },
+      });
+      return { success: true };
+    }),
+
   updateProfile: protectedProcedure
     .input(
       z.object({

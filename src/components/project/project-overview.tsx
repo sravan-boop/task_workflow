@@ -19,7 +19,13 @@ import {
   Loader2,
   Plus,
   ChevronUp,
+  Target,
+  Diamond,
+  Calendar,
+  CheckCircle2,
+  Circle,
 } from "lucide-react";
+import Link from "next/link";
 
 const STATUS_CONFIG: Record<
   string,
@@ -52,6 +58,10 @@ export function ProjectOverview({ projectId }: ProjectOverviewProps) {
   const [updateBody, setUpdateBody] = useState("");
   const [updateStatus, setUpdateStatus] = useState<string>("ON_TRACK");
 
+  const [showCreateMilestone, setShowCreateMilestone] = useState(false);
+  const [milestoneTitle, setMilestoneTitle] = useState("");
+  const [milestoneDueDate, setMilestoneDueDate] = useState("");
+
   const utils = trpc.useUtils();
 
   const generateStatus = trpc.ai.generateProjectStatus.useMutation({
@@ -68,6 +78,29 @@ export function ProjectOverview({ projectId }: ProjectOverviewProps) {
     },
   });
 
+  const createTask = trpc.tasks.create.useMutation({
+    onSuccess: async (newTask) => {
+      // Mark the new task as a milestone
+      await toggleMilestone.mutateAsync({ id: newTask.id, isMilestone: true });
+      utils.tasks.list.invalidate({ projectId });
+      setShowCreateMilestone(false);
+      setMilestoneTitle("");
+      setMilestoneDueDate("");
+    },
+  });
+
+  const toggleMilestone = trpc.tasks.toggleMilestone.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+  });
+
+  const completeTask = trpc.tasks.complete.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+  });
+
+  const uncompleteTask = trpc.tasks.uncomplete.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+  });
+
   const totalTasks = tasks?.length || 0;
   const completedTasks = tasks?.filter((t) => t.status === "COMPLETE").length || 0;
   const incompleteTasks = totalTasks - completedTasks;
@@ -81,6 +114,8 @@ export function ProjectOverview({ projectId }: ProjectOverviewProps) {
     : 0;
   const completionRate =
     totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+  const milestones = tasks?.filter((t: any) => t.isMilestone) || [];
 
   return (
     <div className="p-6">
@@ -105,7 +140,7 @@ export function ProjectOverview({ projectId }: ProjectOverviewProps) {
         <div className="grid grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-4 text-center">
-              <p className="text-2xl font-semibold text-[#1e1f21]">
+              <p className="text-2xl font-semibold text-[#1e1f21] dark:text-foreground">
                 {totalTasks}
               </p>
               <p className="text-xs text-muted-foreground">Total tasks</p>
@@ -141,10 +176,10 @@ export function ProjectOverview({ projectId }: ProjectOverviewProps) {
         <Card>
           <CardContent className="p-4">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-medium text-[#1e1f21]">
+              <span className="text-sm font-medium text-[#1e1f21] dark:text-foreground">
                 Progress
               </span>
-              <span className="text-sm font-medium text-[#1e1f21]">
+              <span className="text-sm font-medium text-[#1e1f21] dark:text-foreground">
                 {completionRate}%
               </span>
             </div>
@@ -188,7 +223,7 @@ export function ProjectOverview({ projectId }: ProjectOverviewProps) {
                   return (
                     <div key={section.id}>
                       <div className="mb-1 flex items-center justify-between">
-                        <span className="text-sm text-[#1e1f21]">
+                        <span className="text-sm text-[#1e1f21] dark:text-foreground">
                           {section.name}
                         </span>
                         <span className="text-xs text-muted-foreground">
@@ -321,7 +356,7 @@ export function ProjectOverview({ projectId }: ProjectOverviewProps) {
                               )}
                             </span>
                           </div>
-                          <p className="mt-0.5 text-sm font-medium text-[#1e1f21]">
+                          <p className="mt-0.5 text-sm font-medium text-[#1e1f21] dark:text-foreground">
                             {update.title}
                           </p>
                           <p className="mt-1 text-sm text-muted-foreground">
@@ -375,7 +410,7 @@ export function ProjectOverview({ projectId }: ProjectOverviewProps) {
           </CardHeader>
           <CardContent>
             {aiStatus ? (
-              <div className="whitespace-pre-wrap text-sm leading-relaxed text-[#1e1f21]">
+              <div className="whitespace-pre-wrap text-sm leading-relaxed text-[#1e1f21] dark:text-foreground">
                 {aiStatus}
               </div>
             ) : (
@@ -388,19 +423,273 @@ export function ProjectOverview({ projectId }: ProjectOverviewProps) {
           </CardContent>
         </Card>
 
-        {/* Milestones placeholder */}
+        {/* Connected Goals */}
+        <ConnectedGoals projectId={projectId} />
+
+        {/* Milestones */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Milestones</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Diamond className="h-4 w-4 text-amber-500" />
+                Milestones
+              </CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs"
+                onClick={() => setShowCreateMilestone(!showCreateMilestone)}
+              >
+                {showCreateMilestone ? (
+                  <ChevronUp className="h-3.5 w-3.5" />
+                ) : (
+                  <Plus className="h-3.5 w-3.5" />
+                )}
+                {showCreateMilestone ? "Cancel" : "Add milestone"}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
-              No milestones set. Create milestone tasks to track key project
-              deliverables.
-            </p>
+            {showCreateMilestone && (
+              <div className="mb-4 space-y-3 rounded-lg border bg-muted/20 p-4">
+                <Input
+                  placeholder="Milestone name..."
+                  value={milestoneTitle}
+                  onChange={(e) => setMilestoneTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && milestoneTitle.trim()) {
+                      createTask.mutate({
+                        title: milestoneTitle.trim(),
+                        projectId,
+                        ...(milestoneDueDate ? { dueDate: new Date(milestoneDueDate).toISOString() } : {}),
+                      });
+                    }
+                  }}
+                />
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      type="date"
+                      value={milestoneDueDate}
+                      onChange={(e) => setMilestoneDueDate(e.target.value)}
+                      className="h-8 w-auto text-xs"
+                    />
+                  </div>
+                  <div className="flex-1" />
+                  <Button
+                    size="sm"
+                    className="bg-[#4573D2] hover:bg-[#3A63B8]"
+                    disabled={!milestoneTitle.trim() || createTask.isPending}
+                    onClick={() =>
+                      createTask.mutate({
+                        title: milestoneTitle.trim(),
+                        projectId,
+                        ...(milestoneDueDate ? { dueDate: new Date(milestoneDueDate).toISOString() } : {}),
+                      })
+                    }
+                  >
+                    {createTask.isPending ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    ) : null}
+                    Create milestone
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {milestones.length > 0 ? (
+              <div className="space-y-2">
+                {milestones.map((ms: any) => {
+                  const isComplete = ms.status === "COMPLETE";
+                  const isOverdue = !isComplete && ms.dueDate && now && new Date(ms.dueDate) < now;
+                  return (
+                    <div
+                      key={ms.id}
+                      className="flex items-center gap-3 rounded-lg border px-4 py-3 hover:bg-muted/30 transition-colors"
+                    >
+                      <button
+                        className="shrink-0"
+                        onClick={() =>
+                          isComplete
+                            ? uncompleteTask.mutate({ id: ms.id })
+                            : completeTask.mutate({ id: ms.id })
+                        }
+                      >
+                        {isComplete ? (
+                          <CheckCircle2 className="h-4.5 w-4.5 text-green-600" />
+                        ) : (
+                          <Circle className="h-4.5 w-4.5 text-muted-foreground hover:text-[#4573D2]" />
+                        )}
+                      </button>
+                      <Diamond className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                      <span
+                        className={`flex-1 text-sm ${
+                          isComplete
+                            ? "text-muted-foreground line-through"
+                            : "font-medium text-[#1e1f21] dark:text-foreground"
+                        }`}
+                      >
+                        {ms.title}
+                      </span>
+                      {ms.dueDate && (
+                        <span
+                          className={`shrink-0 text-xs ${
+                            isComplete
+                              ? "text-muted-foreground"
+                              : isOverdue
+                              ? "text-red-600 font-medium"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {new Date(ms.dueDate).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </span>
+                      )}
+                      {ms.assignee && (
+                        <Avatar className="h-6 w-6 shrink-0">
+                          <AvatarFallback className="bg-[#4573D2] text-[10px] text-white">
+                            {ms.assignee.name
+                              ?.split(" ")
+                              .map((n: string) => n[0])
+                              .join("")
+                              .toUpperCase()
+                              .slice(0, 2)}
+                          </AvatarFallback>
+                        </Avatar>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No milestones set. Add milestones to track key project deliverables.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>
     </div>
+  );
+}
+
+// ── Connected Goals Section ──────────────────────────────────────────
+
+const GOAL_STATUS_COLORS: Record<string, string> = {
+  ON_TRACK: "#7BC86C",
+  AT_RISK: "#FD9A00",
+  OFF_TRACK: "#E8384F",
+  CLOSED: "#6D6E6F",
+};
+
+const GOAL_STATUS_LABELS: Record<string, string> = {
+  ON_TRACK: "On Track",
+  AT_RISK: "At Risk",
+  OFF_TRACK: "Off Track",
+  CLOSED: "Closed",
+};
+
+function ConnectedGoals({ projectId }: { projectId: string }) {
+  const { data: workspaces } = trpc.workspaces.list.useQuery();
+  const workspaceId = workspaces?.[0]?.id;
+
+  const { data: portfolios } = trpc.portfolios.list.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
+
+  // Find portfolios that contain this project
+  const parentPortfolios = portfolios?.filter((p) =>
+    p.projects?.some((pp: any) => pp.projectId === projectId || pp.project?.id === projectId)
+  ) || [];
+
+  // Query goals for each parent portfolio
+  const portfolioIds = parentPortfolios.map((p) => p.id);
+  const goalQueries = portfolioIds.map((pid) =>
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    trpc.portfolios.getGoals.useQuery({ portfolioId: pid }, { enabled: !!pid })
+  );
+
+  const allGoals = goalQueries.flatMap((q) =>
+    (q.data || []).map((pg: any) => pg.goal)
+  );
+
+  // Deduplicate goals by id
+  const seen = new Set<string>();
+  const goals = allGoals.filter((g) => {
+    if (!g || seen.has(g.id)) return false;
+    seen.add(g.id);
+    return true;
+  });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Target className="h-4 w-4 text-[#4573D2]" />
+            Connected goals
+          </CardTitle>
+          <Link
+            href="/goals"
+            className="text-xs text-[#4573D2] hover:underline"
+          >
+            View all goals
+          </Link>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {goals.length > 0 ? (
+          <div className="space-y-3">
+            {goals.map((goal) => {
+              const progress =
+                goal.targetValue > 0
+                  ? Math.round((goal.currentValue / goal.targetValue) * 100)
+                  : 0;
+              return (
+                <div
+                  key={goal.id}
+                  className="flex items-center gap-3 rounded-lg border px-4 py-3"
+                >
+                  <Target className="h-4 w-4 shrink-0 text-[#4573D2]" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-[#1e1f21] dark:text-foreground truncate">
+                      {goal.name}
+                    </p>
+                  </div>
+                  <span
+                    className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
+                    style={{
+                      backgroundColor:
+                        GOAL_STATUS_COLORS[goal.status] || "#6D6E6F",
+                    }}
+                  >
+                    {GOAL_STATUS_LABELS[goal.status] || goal.status}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <div className="h-1.5 w-16 rounded-full bg-gray-100">
+                      <div
+                        className="h-1.5 rounded-full bg-[#4573D2] transition-all"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-muted-foreground w-7 text-right">
+                      {progress}%
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No goals connected. Connect goals to this project&apos;s portfolio to track alignment.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

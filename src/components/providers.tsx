@@ -9,6 +9,7 @@ import { ThemeProvider } from "next-themes";
 import { trpc } from "@/lib/trpc";
 import { Toaster } from "@/components/ui/sonner";
 import { UndoProvider } from "@/contexts/undo-context";
+import { useRealtime } from "@/hooks/use-realtime";
 
 function getBaseUrl() {
   if (typeof window !== "undefined") return "";
@@ -22,8 +23,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 5 * 60 * 1000,
-            refetchOnWindowFocus: false,
+            staleTime: 30 * 1000,
+            refetchOnWindowFocus: true,
           },
         },
       })
@@ -53,6 +54,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <QueryClientProvider client={queryClient}>
           <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
             <UndoProvider>
+              <RealtimeSync />
               {children}
             </UndoProvider>
             <Toaster position="bottom-right" richColors />
@@ -61,4 +63,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
       </trpc.Provider>
     </SessionProvider>
   );
+}
+
+// Connects to the SSE endpoint and invalidates tRPC caches on real-time events
+function RealtimeSync() {
+  const { data: workspaces } = trpc.workspaces.list.useQuery(undefined, {
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const workspaceId = workspaces?.[0]?.id;
+  useRealtime(workspaceId);
+  return null;
 }

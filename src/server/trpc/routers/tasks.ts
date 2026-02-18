@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Prisma } from "../../../../prisma/generated/prisma/client";
 import { router, protectedProcedure } from "../trpc";
 import { executeRules } from "../../services/rules-engine";
+import { realtime, REALTIME_EVENTS } from "../../services/realtime";
 
 function calculateNextDueDate(
   currentDueDate: Date | null,
@@ -154,6 +155,41 @@ export const tasksRouter = router({
       });
     }),
 
+  searchAll: protectedProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        query: z.string().min(1),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id;
+      return ctx.prisma.task.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          title: { contains: input.query, mode: "insensitive" },
+          parentTaskId: null,
+          // Only return tasks the user has access to
+          OR: [
+            { assigneeId: userId },
+            { createdById: userId },
+            { taskProjects: { some: { project: { OR: [
+              { createdById: userId },
+              { members: { some: { userId } } },
+            ] } } } },
+          ],
+        },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          assignee: { select: { name: true } },
+        },
+        take: 10,
+        orderBy: { createdAt: "desc" },
+      });
+    }),
+
   create: protectedProcedure
     .input(
       z.object({
@@ -166,6 +202,7 @@ export const tasksRouter = router({
         sectionId: z.string().optional(),
         parentTaskId: z.string().optional(),
         workspaceId: z.string().optional(),
+        priority: z.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -217,6 +254,7 @@ export const tasksRouter = router({
           assigneeId: input.assigneeId || ctx.session.user.id,
           dueDate: input.dueDate ? new Date(input.dueDate) : undefined,
           startDate: input.startDate ? new Date(input.startDate) : undefined,
+          priority: input.priority,
           parentTaskId: input.parentTaskId,
           workspaceId,
           createdById: ctx.session.user.id,
@@ -233,6 +271,25 @@ export const tasksRouter = router({
         },
       });
 
+      // Send TASK_ASSIGNED notification if assignee is different from creator
+      const actualAssigneeId = input.assigneeId || ctx.session.user.id;
+      if (actualAssigneeId !== ctx.session.user.id) {
+        const actor = await ctx.prisma.user.findUnique({
+          where: { id: ctx.session.user.id },
+          select: { name: true },
+        });
+        await ctx.prisma.notification.create({
+          data: {
+            userId: actualAssigneeId,
+            type: "TASK_ASSIGNED",
+            resourceType: "task",
+            resourceId: task.id,
+            actorId: ctx.session.user.id,
+            message: `${actor?.name ?? "Someone"} assigned you to "${task.title}"`,
+          },
+        });
+      }
+
       // Execute rules for TASK_ADDED (only if in a project)
       if (input.projectId) {
         executeRules(ctx.prisma, "TASK_ADDED", {
@@ -241,6 +298,8 @@ export const tasksRouter = router({
           userId: ctx.session.user.id,
         }).catch(console.error);
       }
+
+      realtime.publish({ type: REALTIME_EVENTS.TASK_CREATED, workspaceId: workspaceId!, data: { taskId: task.id } });
 
       return task;
     }),
@@ -254,12 +313,13 @@ export const tasksRouter = router({
         assigneeId: z.string().nullable().optional(),
         dueDate: z.string().datetime().nullable().optional(),
         startDate: z.string().datetime().nullable().optional(),
+        priority: z.enum(["LOW", "MEDIUM", "HIGH"]).nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
 
-      return ctx.prisma.task.update({
+      const task = await ctx.prisma.task.update({
         where: { id },
         data: {
           ...data,
@@ -277,6 +337,28 @@ export const tasksRouter = router({
           },
         },
       });
+
+      // Send TASK_ASSIGNED notification if assignee changed to someone else
+      if (input.assigneeId && input.assigneeId !== ctx.session.user.id) {
+        const actor = await ctx.prisma.user.findUnique({
+          where: { id: ctx.session.user.id },
+          select: { name: true },
+        });
+        await ctx.prisma.notification.create({
+          data: {
+            userId: input.assigneeId,
+            type: "TASK_ASSIGNED",
+            resourceType: "task",
+            resourceId: task.id,
+            actorId: ctx.session.user.id,
+            message: `${actor?.name ?? "Someone"} assigned you to "${task.title}"`,
+          },
+        });
+      }
+
+      realtime.publish({ type: REALTIME_EVENTS.TASK_UPDATED, workspaceId: task.workspaceId, data: { taskId: task.id } });
+
+      return task;
     }),
 
   complete: protectedProcedure
@@ -301,6 +383,66 @@ export const tasksRouter = router({
           taskId: input.id,
           userId: ctx.session.user.id,
         }).catch(console.error); // Fire and forget - don't block the response
+      }
+
+      // Send TASK_COMPLETED notification to task creator and assignee
+      const fullTask = await ctx.prisma.task.findUnique({
+        where: { id: input.id },
+        select: { createdById: true, title: true, assigneeId: true, followers: { select: { userId: true } } },
+      });
+      if (fullTask) {
+        const actor = await ctx.prisma.user.findUnique({
+          where: { id: ctx.session.user.id },
+          select: { name: true },
+        });
+        const notifiedIds = new Set<string>();
+        // Notify creator if different from completer
+        if (fullTask.createdById && fullTask.createdById !== ctx.session.user.id) {
+          await ctx.prisma.notification.create({
+            data: {
+              userId: fullTask.createdById,
+              type: "TASK_COMPLETED",
+              resourceType: "task",
+              resourceId: input.id,
+              actorId: ctx.session.user.id,
+              message: `${actor?.name ?? "Someone"} completed "${fullTask.title}"`,
+            },
+          });
+          notifiedIds.add(fullTask.createdById);
+        }
+        // Notify assignee if different from both completer and creator
+        if (
+          fullTask.assigneeId &&
+          fullTask.assigneeId !== ctx.session.user.id &&
+          !notifiedIds.has(fullTask.assigneeId)
+        ) {
+          await ctx.prisma.notification.create({
+            data: {
+              userId: fullTask.assigneeId,
+              type: "TASK_COMPLETED",
+              resourceType: "task",
+              resourceId: input.id,
+              actorId: ctx.session.user.id,
+              message: `${actor?.name ?? "Someone"} completed "${fullTask.title}"`,
+            },
+          });
+          notifiedIds.add(fullTask.assigneeId);
+        }
+        // Notify followers
+        for (const f of fullTask.followers ?? []) {
+          if (f.userId !== ctx.session.user.id && !notifiedIds.has(f.userId)) {
+            await ctx.prisma.notification.create({
+              data: {
+                userId: f.userId,
+                type: "TASK_COMPLETED",
+                resourceType: "task",
+                resourceId: input.id,
+                actorId: ctx.session.user.id,
+                message: `${actor?.name ?? "Someone"} completed "${fullTask.title}"`,
+              },
+            });
+          }
+        }
       }
 
       // Check if task is recurring and create next occurrence
@@ -354,26 +496,32 @@ export const tasksRouter = router({
         }
       }
 
+      realtime.publish({ type: REALTIME_EVENTS.TASK_COMPLETED, workspaceId: completedTask.workspaceId, data: { taskId: completedTask.id } });
+
       return completedTask;
     }),
 
   uncomplete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.task.update({
+      const task = await ctx.prisma.task.update({
         where: { id: input.id },
         data: {
           status: "INCOMPLETE",
           completedAt: null,
         },
       });
+      realtime.publish({ type: REALTIME_EVENTS.TASK_UPDATED, workspaceId: task.workspaceId, data: { taskId: task.id } });
+      return task;
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      // Get workspaceId before deleting
+      const taskMeta = await ctx.prisma.task.findUnique({ where: { id: input.id }, select: { workspaceId: true } });
       // Use a transaction to delete subtasks first, then the task
-      return ctx.prisma.$transaction(async (tx) => {
+      const result = await ctx.prisma.$transaction(async (tx) => {
         // Recursively delete all subtasks
         const deleteSubtasks = async (parentId: string) => {
           const subtasks = await tx.task.findMany({
@@ -388,6 +536,10 @@ export const tasksRouter = router({
         await deleteSubtasks(input.id);
         return tx.task.delete({ where: { id: input.id } });
       });
+      if (taskMeta) {
+        realtime.publish({ type: REALTIME_EVENTS.TASK_DELETED, workspaceId: taskMeta.workspaceId, data: { taskId: input.id } });
+      }
+      return result;
     }),
 
   move: protectedProcedure
@@ -417,6 +569,11 @@ export const tasksRouter = router({
         taskId: input.taskId,
         userId: ctx.session.user.id,
       }).catch(console.error); // Fire and forget - don't block the response
+
+      const taskForWs = await ctx.prisma.task.findUnique({ where: { id: input.taskId }, select: { workspaceId: true } });
+      if (taskForWs) {
+        realtime.publish({ type: REALTIME_EVENTS.TASK_UPDATED, workspaceId: taskForWs.workspaceId, data: { taskId: input.taskId } });
+      }
 
       return result;
     }),
@@ -460,6 +617,23 @@ export const tasksRouter = router({
         data: {
           taskId: input.taskId,
           dependsOnTaskId: input.dependsOnTaskId,
+        },
+        include: { dependsOn: true, task: true },
+      });
+    }),
+
+  addBlocking: protectedProcedure
+    .input(
+      z.object({
+        taskId: z.string(),
+        blocksTaskId: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.prisma.taskDependency.create({
+        data: {
+          taskId: input.blocksTaskId,
+          dependsOnTaskId: input.taskId,
         },
         include: { dependsOn: true, task: true },
       });
@@ -559,6 +733,8 @@ export const tasksRouter = router({
         },
       });
 
+      realtime.publish({ type: REALTIME_EVENTS.TASK_CREATED, workspaceId: source.workspaceId, data: { taskId: task.id } });
+
       return task;
     }),
 
@@ -620,6 +796,20 @@ export const tasksRouter = router({
       });
     }),
 
+  toggleMilestone: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        isMilestone: z.boolean(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.prisma.task.update({
+        where: { id: input.id },
+        data: { isMilestone: input.isMilestone },
+      });
+    }),
+
   markAsApproval: protectedProcedure
     .input(
       z.object({
@@ -633,6 +823,59 @@ export const tasksRouter = router({
         data: {
           isApproval: input.isApproval,
           approvalStatus: input.isApproval ? "PENDING" : null,
+        },
+      });
+    }),
+
+  addFollower: protectedProcedure
+    .input(
+      z.object({
+        taskId: z.string(),
+        userId: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const follower = await ctx.prisma.taskFollower.create({
+        data: {
+          taskId: input.taskId,
+          userId: input.userId,
+        },
+        include: { user: true },
+      });
+
+      // Notify the added collaborator
+      if (input.userId !== ctx.session.user.id) {
+        const [actor, task] = await Promise.all([
+          ctx.prisma.user.findUnique({ where: { id: ctx.session.user.id }, select: { name: true } }),
+          ctx.prisma.task.findUnique({ where: { id: input.taskId }, select: { title: true } }),
+        ]);
+        await ctx.prisma.notification.create({
+          data: {
+            userId: input.userId,
+            type: "TASK_ASSIGNED",
+            resourceType: "task",
+            resourceId: input.taskId,
+            actorId: ctx.session.user.id,
+            message: `${actor?.name ?? "Someone"} added you as a collaborator on "${task?.title ?? "a task"}"`,
+          },
+        });
+      }
+
+      return follower;
+    }),
+
+  removeFollower: protectedProcedure
+    .input(
+      z.object({
+        taskId: z.string(),
+        userId: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.prisma.taskFollower.deleteMany({
+        where: {
+          taskId: input.taskId,
+          userId: input.userId,
         },
       });
     }),

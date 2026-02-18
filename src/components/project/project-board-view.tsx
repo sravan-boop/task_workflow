@@ -13,9 +13,11 @@ import {
   CheckCircle2,
   Circle,
   Calendar,
+  CalendarDays,
   GripVertical,
   Pencil,
   Trash2,
+  User,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -23,6 +25,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import {
   DndContext,
@@ -192,22 +201,51 @@ export function ProjectBoardView({
 
   const [addingTaskInSection, setAddingTaskInSection] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskAssigneeId, setNewTaskAssigneeId] = useState("");
+  const [newTaskPriority, setNewTaskPriority] = useState("");
+  const [newTaskStatus, setNewTaskStatus] = useState("");
+  const [newTaskDueDate, setNewTaskDueDate] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [showInviteEmail, setShowInviteEmail] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  const { data: workspaces } = trpc.workspaces.list.useQuery();
+  const workspaceId = workspaces?.[0]?.id;
+  const { data: members } = trpc.workspaces.getMembers.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
+
+  const findOrInvite = trpc.workspaces.findOrInviteByEmail.useMutation();
 
   const createTask = trpc.tasks.create.useMutation({
     onSuccess: () => {
       utils.tasks.list.invalidate({ projectId });
+      utils.tasks.myTasks.invalidate();
       setNewTaskTitle("");
+      setNewTaskAssigneeId("");
+      setNewTaskPriority("");
+      setNewTaskStatus("");
+      setNewTaskDueDate("");
       setAddingTaskInSection(null);
+      setShowInviteEmail(false);
+      setInviteEmail("");
+      toast.success("Task created");
     },
   });
 
   const completeTask = trpc.tasks.complete.useMutation({
-    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+    onSuccess: () => {
+      utils.tasks.list.invalidate({ projectId });
+      utils.tasks.myTasks.invalidate();
+    },
   });
 
   const moveTask = trpc.tasks.move.useMutation({
-    onSuccess: () => utils.tasks.list.invalidate({ projectId }),
+    onSuccess: () => {
+      utils.tasks.list.invalidate({ projectId });
+      utils.tasks.myTasks.invalidate();
+    },
   });
 
   const renameSection = trpc.sections.update.useMutation({
@@ -251,7 +289,36 @@ export function ProjectBoardView({
       title: newTaskTitle.trim(),
       projectId,
       sectionId,
+      priority: (newTaskPriority as "LOW" | "MEDIUM" | "HIGH") || undefined,
+      assigneeId: newTaskAssigneeId || undefined,
+      dueDate: newTaskDueDate ? new Date(newTaskDueDate + "T00:00:00.000Z").toISOString() : undefined,
     });
+  };
+
+  const handleInviteByEmail = async () => {
+    if (!inviteEmail.trim() || !workspaceId) return;
+    const found = members?.find(
+      (m) => m.user.email.toLowerCase() === inviteEmail.trim().toLowerCase()
+    );
+    if (found) {
+      setNewTaskAssigneeId(found.user.id);
+      toast.success(`${found.user.name} set as assignee`);
+    } else {
+      try {
+        const result = await findOrInvite.mutateAsync({ workspaceId, email: inviteEmail.trim() });
+        if (result.emailSent) {
+          toast.success(`Invite email sent to ${inviteEmail}. They can be assigned once they join.`);
+        } else if (result.userId) {
+          setNewTaskAssigneeId(result.userId);
+          toast.success("User added to workspace and set as assignee");
+          utils.workspaces.getMembers.invalidate();
+        }
+      } catch (err: any) {
+        toast.error(err.message || "Failed to invite user");
+      }
+    }
+    setInviteEmail("");
+    setShowInviteEmail(false);
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -369,32 +436,195 @@ export function ProjectBoardView({
 
                 {/* Add Task */}
                 {addingTaskInSection === section.id ? (
-                  <Card className="border bg-white p-3">
+                  <Card className="border bg-white p-3 space-y-2.5">
+                    {/* Task name */}
                     <Input
                       value={newTaskTitle}
                       onChange={(e) => setNewTaskTitle(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") handleAddTask(section.id);
+                        if (e.key === "Enter" && newTaskTitle.trim()) handleAddTask(section.id);
                         if (e.key === "Escape") {
                           setAddingTaskInSection(null);
                           setNewTaskTitle("");
-                        }
-                      }}
-                      onBlur={() => {
-                        if (newTaskTitle.trim()) handleAddTask(section.id);
-                        else {
-                          setAddingTaskInSection(null);
-                          setNewTaskTitle("");
+                          setNewTaskAssigneeId("");
+                          setNewTaskPriority("");
+                          setNewTaskStatus("");
+                          setNewTaskDueDate("");
+                          setShowInviteEmail(false);
+                          setInviteEmail("");
                         }
                       }}
                       placeholder="Task name"
-                      className="h-7 border-none bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+                      className="h-7 text-sm"
                       autoFocus
                     />
+
+                    {/* Assignee */}
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium text-muted-foreground">
+                        <User className="mr-0.5 inline h-3 w-3" /> Assignee
+                      </label>
+                      <Select value={newTaskAssigneeId} onValueChange={setNewTaskAssigneeId}>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue placeholder="Select assignee" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {members?.map((m) => (
+                            <SelectItem key={m.user.id} value={m.user.id}>
+                              <div className="flex items-center gap-1.5">
+                                <Avatar className="h-4 w-4">
+                                  <AvatarFallback className="bg-[#4573D2] text-[7px] text-white">
+                                    {m.user.name?.split(" ").map((n) => n[0]).join("")}
+                                  </AvatarFallback>
+                                </Avatar>
+                                {m.user.name}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {!showInviteEmail ? (
+                        <button
+                          className="mt-1 text-[10px] text-[#4573D2] hover:underline"
+                          onClick={() => setShowInviteEmail(true)}
+                        >
+                          + Invite via email
+                        </button>
+                      ) : (
+                        <div className="mt-1 flex items-center gap-1">
+                          <Input
+                            value={inviteEmail}
+                            onChange={(e) => setInviteEmail(e.target.value)}
+                            placeholder="name@email.com"
+                            className="h-6 text-[10px]"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleInviteByEmail();
+                              }
+                            }}
+                          />
+                          <Button
+                            size="sm"
+                            className="h-6 px-2 text-[10px] bg-[#4573D2] hover:bg-[#3A63B8]"
+                            onClick={handleInviteByEmail}
+                            disabled={!inviteEmail.trim()}
+                          >
+                            Invite
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Priority & Status row */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="mb-1 block text-[10px] font-medium text-muted-foreground">Priority</label>
+                        <Select value={newTaskPriority} onValueChange={setNewTaskPriority}>
+                          <SelectTrigger className="h-7 text-xs">
+                            <SelectValue placeholder="Priority" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="LOW">
+                              <span className="flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full bg-blue-400" /> Low
+                              </span>
+                            </SelectItem>
+                            <SelectItem value="MEDIUM">
+                              <span className="flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full bg-yellow-400" /> Medium
+                              </span>
+                            </SelectItem>
+                            <SelectItem value="HIGH">
+                              <span className="flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full bg-red-400" /> High
+                              </span>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[10px] font-medium text-muted-foreground">Status</label>
+                        <Select value={newTaskStatus} onValueChange={setNewTaskStatus}>
+                          <SelectTrigger className="h-7 text-xs">
+                            <SelectValue placeholder="Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ON_TRACK">
+                              <span className="flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full bg-green-500" /> On Track
+                              </span>
+                            </SelectItem>
+                            <SelectItem value="AT_RISK">
+                              <span className="flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full bg-yellow-500" /> At Risk
+                              </span>
+                            </SelectItem>
+                            <SelectItem value="OFF_TRACK">
+                              <span className="flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full bg-red-500" /> Off Track
+                              </span>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* Due Date */}
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium text-muted-foreground">
+                        <CalendarDays className="mr-0.5 inline h-3 w-3" /> Due date
+                      </label>
+                      <input
+                        type="date"
+                        value={newTaskDueDate}
+                        onChange={(e) => setNewTaskDueDate(e.target.value)}
+                        className="flex h-7 w-full rounded-md border border-input bg-transparent px-2 py-1 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button
+                        size="sm"
+                        className="h-7 gap-1 bg-[#4573D2] hover:bg-[#3A63B8] text-xs flex-1"
+                        disabled={!newTaskTitle.trim() || createTask.isPending}
+                        onClick={() => handleAddTask(section.id)}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        {createTask.isPending ? "Creating..." : "Create"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          setAddingTaskInSection(null);
+                          setNewTaskTitle("");
+                          setNewTaskAssigneeId("");
+                          setNewTaskPriority("");
+                          setNewTaskStatus("");
+                          setNewTaskDueDate("");
+                          setShowInviteEmail(false);
+                          setInviteEmail("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
                   </Card>
                 ) : (
                   <button
-                    onClick={() => setAddingTaskInSection(section.id)}
+                    onClick={() => {
+                      setAddingTaskInSection(section.id);
+                      setNewTaskTitle("");
+                      setNewTaskAssigneeId("");
+                      setNewTaskPriority("");
+                      setNewTaskStatus("");
+                      setNewTaskDueDate("");
+                      setShowInviteEmail(false);
+                      setInviteEmail("");
+                    }}
                     className="flex w-full items-center gap-1.5 rounded-lg border border-dashed py-2 text-sm text-muted-foreground transition-colors hover:border-solid hover:bg-white"
                   >
                     <Plus className="mx-auto h-4 w-4" />

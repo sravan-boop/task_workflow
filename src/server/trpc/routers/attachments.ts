@@ -12,6 +12,27 @@ export const attachmentsRouter = router({
       });
     }),
 
+  listByProject: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.prisma.attachment.findMany({
+        where: {
+          task: {
+            taskProjects: {
+              some: { projectId: input.projectId },
+            },
+          },
+        },
+        include: {
+          uploadedBy: true,
+          task: {
+            select: { id: true, title: true },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+    }),
+
   create: protectedProcedure
     .input(
       z.object({

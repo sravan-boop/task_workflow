@@ -38,8 +38,11 @@ export function AiCreateTask({
     onSuccess: (data) => setParsed(data),
   });
 
+  const utils = trpc.useUtils();
   const createTask = trpc.tasks.create.useMutation({
     onSuccess: () => {
+      utils.tasks.list.invalidate();
+      utils.tasks.myTasks.invalidate();
       onTaskCreated();
       setParsed(null);
       setText("");

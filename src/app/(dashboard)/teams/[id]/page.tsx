@@ -69,8 +69,31 @@ export default function TeamPage() {
     : "";
 
   const copyInviteLink = () => {
-    navigator.clipboard.writeText(inviteLink);
-    toast.success("Invite link copied to clipboard");
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(inviteLink).then(() => {
+        toast.success("Invite link copied to clipboard");
+      }).catch(() => {
+        fallbackCopy(inviteLink);
+      });
+    } else {
+      fallbackCopy(inviteLink);
+    }
+  };
+
+  const fallbackCopy = (text: string) => {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand("copy");
+      toast.success("Invite link copied to clipboard");
+    } catch {
+      toast.error("Failed to copy. Please copy manually.");
+    }
+    document.body.removeChild(textarea);
   };
 
   if (isLoading) {
@@ -201,6 +224,7 @@ export default function TeamPage() {
                       value={inviteLink}
                       readOnly
                       className="text-xs"
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
                     />
                     <Button variant="outline" size="icon" onClick={copyInviteLink}>
                       <Copy className="h-3.5 w-3.5" />
@@ -276,7 +300,7 @@ export default function TeamPage() {
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="mb-2 text-xs font-medium text-[#1e1f21]">Or share invite link</p>
               <div className="flex gap-2">
-                <Input value={inviteLink} readOnly className="text-xs" />
+                <Input value={inviteLink} readOnly className="text-xs" onClick={(e) => (e.target as HTMLInputElement).select()} />
                 <Button type="button" variant="outline" size="sm" onClick={copyInviteLink}>
                   <Copy className="h-3.5 w-3.5" />
                 </Button>

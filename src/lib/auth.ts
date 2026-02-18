@@ -3,6 +3,8 @@ import type { Provider } from "next-auth/providers";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
+import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
+import Apple from "next-auth/providers/apple";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/server/db/prisma";
 
@@ -51,6 +53,27 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    })
+  );
+}
+
+// Only add Microsoft Entra ID provider when credentials are configured
+if (process.env.AZURE_AD_CLIENT_ID && process.env.AZURE_AD_CLIENT_SECRET && process.env.AZURE_AD_TENANT_ID) {
+  providers.push(
+    MicrosoftEntraID({
+      clientId: process.env.AZURE_AD_CLIENT_ID,
+      clientSecret: process.env.AZURE_AD_CLIENT_SECRET,
+      issuer: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID}/v2.0/`,
+    })
+  );
+}
+
+// Only add Apple provider when credentials are configured
+if (process.env.APPLE_ID && process.env.APPLE_SECRET) {
+  providers.push(
+    Apple({
+      clientId: process.env.APPLE_ID,
+      clientSecret: process.env.APPLE_SECRET,
     })
   );
 }

@@ -87,7 +87,7 @@ const INTEGRATIONS = [
   {
     type: "CALENDAR" as const,
     name: "Calendar Sync",
-    description: "Sync task due dates with Google Calendar or Outlook.",
+    description: "Sync task due dates with Google Calendar.",
     icon: CalendarDays,
     color: "#16a34a",
     configFields: [] as string[],

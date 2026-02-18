@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   Search,
   Plus,
@@ -38,6 +38,7 @@ export function Topbar() {
   const { data: session } = useSession();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
@@ -126,7 +127,15 @@ export function Topbar() {
     } else if (segments[0] === "my-tasks") {
       crumbs.push({ label: "My Tasks", href: "/my-tasks" });
     } else if (segments[0] === "projects" && segments[1]) {
-      crumbs.push({ label: "Projects", href: "/home" });
+      const from = searchParams.get("from");
+      const portfolioId = searchParams.get("portfolioId");
+      const portfolioName = searchParams.get("portfolioName");
+      if (from === "portfolio" && portfolioId) {
+        crumbs.push({ label: "Portfolios", href: "/portfolios" });
+        crumbs.push({ label: portfolioName || "Portfolio", href: `/portfolios/${portfolioId}` });
+      } else {
+        crumbs.push({ label: "Projects", href: "/home" });
+      }
       crumbs.push({ label: "Project", href: `/projects/${segments[1]}` });
     } else if (segments[0] === "reporting") {
       crumbs.push({ label: "Reporting", href: "/reporting" });
@@ -145,7 +154,7 @@ export function Topbar() {
       crumbs.push({ label: "Integrations", href: "/integrations" });
     }
     return crumbs;
-  }, [pathname]);
+  }, [pathname, searchParams]);
 
   const userInitials = session?.user?.name
     ?.split(" ")

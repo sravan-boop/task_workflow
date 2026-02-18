@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
+import { realtime, REALTIME_EVENTS } from "../../services/realtime";
 
 export const savedReportsRouter = router({
   list: protectedProcedure
@@ -20,7 +21,7 @@ export const savedReportsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.savedReport.create({
+      const report = await ctx.prisma.savedReport.create({
         data: {
           name: input.name,
           workspaceId: input.workspaceId,
@@ -28,6 +29,8 @@ export const savedReportsRouter = router({
           config: input.config,
         },
       });
+      realtime.publish({ type: REALTIME_EVENTS.REPORT_CREATED, workspaceId: input.workspaceId, data: { reportId: report.id } });
+      return report;
     }),
 
   update: protectedProcedure
@@ -40,12 +43,19 @@ export const savedReportsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      return ctx.prisma.savedReport.update({ where: { id }, data });
+      const report = await ctx.prisma.savedReport.update({ where: { id }, data });
+      realtime.publish({ type: REALTIME_EVENTS.REPORT_UPDATED, workspaceId: report.workspaceId, data: { reportId: report.id } });
+      return report;
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.savedReport.delete({ where: { id: input.id } });
+      const report = await ctx.prisma.savedReport.findUnique({ where: { id: input.id }, select: { workspaceId: true } });
+      const result = await ctx.prisma.savedReport.delete({ where: { id: input.id } });
+      if (report) {
+        realtime.publish({ type: REALTIME_EVENTS.REPORT_DELETED, workspaceId: report.workspaceId, data: { reportId: input.id } });
+      }
+      return result;
     }),
 });

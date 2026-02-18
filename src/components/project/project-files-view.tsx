@@ -34,22 +34,13 @@ function formatFileSize(bytes: number): string {
 }
 
 export function ProjectFilesView({ projectId }: ProjectFilesViewProps) {
-  const { data: tasks, isLoading } = trpc.tasks.list.useQuery({ projectId });
+  const { data: projectAttachments, isLoading } = trpc.attachments.listByProject.useQuery({ projectId });
 
-  // Collect all attachments from all tasks
-  const attachments =
-    tasks
-      ?.flatMap((task) =>
-        (task as any).attachments?.map((att: any) => ({
-          ...att,
-          taskTitle: task.title,
-          taskId: task.id,
-        })) ?? []
-      )
-      .sort(
-        (a: any, b: any) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      ) ?? [];
+  const attachments = (projectAttachments ?? []).map((att: any) => ({
+    ...att,
+    taskTitle: att.task?.title ?? "Unknown task",
+    taskId: att.task?.id,
+  }));
 
   if (isLoading) {
     return (

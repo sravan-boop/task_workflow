@@ -37,7 +37,25 @@ import {
   Mail,
   Download,
   MoreHorizontal,
+  Diamond,
+  Send,
+  Loader2,
+  X,
+  Wand2,
+  FileText,
+  Printer,
+  Table,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { FollowUpTaskDialog } from "@/components/task/follow-up-task-dialog";
 
 type ViewMode = "list" | "board" | "calendar";
 
@@ -45,6 +63,12 @@ export function MyTasksContent() {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskDueDate, setNewTaskDueDate] = useState("");
+  const [addingInSection, setAddingInSection] = useState<string | null>(null);
+  const [sectionTaskTitle, setSectionTaskTitle] = useState("");
+  const [sectionTaskDueDate, setSectionTaskDueDate] = useState("");
   useEffect(() => { setMounted(true); }, []);
 
   const { data: workspaces } = trpc.workspaces.list.useQuery();
@@ -84,9 +108,10 @@ export function MyTasksContent() {
   });
 
   const markAsApproval = trpc.tasks.markAsApproval.useMutation({
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       if (workspaceId) utils.tasks.myTasks.invalidate({ workspaceId });
-      toast.success("Marked as approval");
+      utils.tasks.get.invalidate({ id: variables.id });
+      toast.success(variables.isApproval ? "Marked as approval" : "Approval removed");
     },
   });
 
@@ -96,8 +121,54 @@ export function MyTasksContent() {
     },
   });
 
+  const createTask = trpc.tasks.create.useMutation({
+    onSuccess: () => {
+      if (workspaceId) utils.tasks.myTasks.invalidate({ workspaceId });
+      setNewTaskTitle("");
+      setNewTaskDueDate("");
+      setShowAddTask(false);
+      setSectionTaskTitle("");
+      setSectionTaskDueDate("");
+      setAddingInSection(null);
+      toast.success("Task created");
+    },
+    onError: (err) => {
+      toast.error(err.message || "Failed to create task");
+    },
+  });
+
+  const toggleMilestone = trpc.tasks.toggleMilestone.useMutation({
+    onSuccess: (_data, variables) => {
+      if (workspaceId) utils.tasks.myTasks.invalidate({ workspaceId });
+      utils.tasks.get.invalidate({ id: variables.id });
+      toast.success(variables.isMilestone ? "Marked as milestone" : "Milestone removed");
+    },
+  });
+
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; taskId: string } | null>(null);
   const contextRef = useRef<HTMLDivElement>(null);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [followUpTaskId, setFollowUpTaskId] = useState("");
+  const [followUpTaskTitle, setFollowUpTaskTitle] = useState("");
+  const [showApprovals, setShowApprovals] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "incomplete" | "completed">("all");
+  const [showAiCreator, setShowAiCreator] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiGeneratedTasks, setAiGeneratedTasks] = useState<string[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [showEmailTasks, setShowEmailTasks] = useState(false);
+  const [emailTaskContent, setEmailTaskContent] = useState("");
+  const [emailFrom, setEmailFrom] = useState("");
+  const [syncing, setSyncing] = useState(false);
+
+  const aiChat = trpc.ai.chat.useMutation();
+
+  // Listen for quick-add-task events (on window to match QuickAddTaskDialog)
+  useEffect(() => {
+    const handleQuickAdd = () => setShowAddTask(true);
+    window.addEventListener("quick-add-task", handleQuickAdd);
+    return () => window.removeEventListener("quick-add-task", handleQuickAdd);
+  }, []);
 
   useEffect(() => {
     const handler = () => setContextMenu(null);
@@ -119,6 +190,136 @@ export function MyTasksContent() {
     }
   };
 
+  const handleSectionAddTask = (sectionLabel: string) => {
+    if (!sectionTaskTitle.trim()) return;
+    // Pre-set due date based on section
+    let dueDate = sectionTaskDueDate;
+    if (!dueDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (sectionLabel === "Overdue" || sectionLabel === "Today") {
+        dueDate = today.toISOString().split("T")[0];
+      } else if (sectionLabel === "Upcoming") {
+        const nextWeek = new Date(today);
+        nextWeek.setDate(nextWeek.getDate() + 7);
+        dueDate = nextWeek.toISOString().split("T")[0];
+      }
+    }
+    createTask.mutate({
+      title: sectionTaskTitle.trim(),
+      workspaceId,
+      dueDate: dueDate ? new Date(dueDate + "T00:00:00.000Z").toISOString() : undefined,
+    });
+  };
+
+  const handleExportCSV = () => {
+    if (!tasks || tasks.length === 0) { toast.info("No tasks to export"); return; }
+    const csv = ["Title,Status,Due Date,Project"].concat(
+      tasks.map(t => `"${t.title}",${t.status},${t.dueDate ? new Date(t.dueDate).toLocaleDateString() : ""},${t.taskProjects?.[0]?.project?.name ?? ""}`)
+    ).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "my-tasks.csv"; a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Tasks exported as CSV");
+  };
+
+  const handlePrint = () => {
+    if (!tasks || tasks.length === 0) { toast.info("No tasks to print"); return; }
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) { toast.error("Please allow popups"); return; }
+    printWindow.document.write(`
+      <html><head><title>My Tasks</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; }
+        h1 { font-size: 20px; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background: #f5f5f5; font-weight: 600; }
+        .complete { text-decoration: line-through; color: #999; }
+      </style></head><body>
+      <h1>My Tasks</h1>
+      <table>
+        <thead><tr><th>Task</th><th>Status</th><th>Due Date</th><th>Project</th></tr></thead>
+        <tbody>${tasks.map(t => `<tr class="${t.status === "COMPLETE" ? "complete" : ""}"><td>${t.title}</td><td>${t.status === "COMPLETE" ? "Complete" : "Incomplete"}</td><td>${t.dueDate ? new Date(t.dueDate).toLocaleDateString() : "—"}</td><td>${t.taskProjects?.[0]?.project?.name ?? "—"}</td></tr>`).join("")}</tbody>
+      </table></body></html>
+    `);
+    printWindow.document.close();
+    printWindow.print();
+  };
+
+  const handleExportGoogleSheets = () => {
+    if (!tasks || tasks.length === 0) { toast.info("No tasks to export"); return; }
+    const header = "Title\tStatus\tDue Date\tProject";
+    const rows = tasks.map(t =>
+      `${t.title}\t${t.status === "COMPLETE" ? "Complete" : "Incomplete"}\t${t.dueDate ? new Date(t.dueDate).toLocaleDateString() : ""}\t${t.taskProjects?.[0]?.project?.name ?? ""}`
+    );
+    const tsv = [header, ...rows].join("\n");
+    const blob = new Blob([tsv], { type: "text/tab-separated-values" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "my-tasks.tsv"; a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Exported for Google Sheets (TSV). Open in Google Sheets → File → Import");
+  };
+
+  const handleAiGenerate = async () => {
+    if (!aiPrompt.trim()) return;
+    setAiLoading(true);
+    try {
+      const result = await aiChat.mutateAsync({
+        message: `Generate a list of 5-7 actionable task titles for the following goal. Return ONLY a JSON array of strings, no markdown, no code fences, no explanation. Example: ["Task 1","Task 2","Task 3"]\n\nGoal: ${aiPrompt.trim()}`,
+      });
+      // Parse the AI response as a JSON array of task titles
+      const text = result.response.trim();
+      // Try to extract a JSON array from the response
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setAiGeneratedTasks(parsed.map((t: any) => String(t)));
+        } else {
+          // Fallback: split by newlines
+          setAiGeneratedTasks(text.split("\n").map(l => l.replace(/^[-*\d.)\s]+/, "").trim()).filter(Boolean).slice(0, 7));
+        }
+      } else {
+        // Fallback: split by newlines and clean up
+        setAiGeneratedTasks(text.split("\n").map(l => l.replace(/^[-*\d.)\s]+/, "").trim()).filter(Boolean).slice(0, 7));
+      }
+    } catch (err: any) {
+      toast.error(err.message || "AI generation failed. Check your API key configuration.");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleAddAiTasks = () => {
+    if (!aiGeneratedTasks.length || !workspaceId) return;
+    aiGeneratedTasks.forEach((title) => {
+      createTask.mutate({ title, workspaceId });
+    });
+    setAiGeneratedTasks([]);
+    setAiPrompt("");
+    setShowAiCreator(false);
+    toast.success(`${aiGeneratedTasks.length} tasks created from AI suggestions`);
+  };
+
+  const handleEmailTaskSubmit = () => {
+    if (!emailTaskContent.trim() || !workspaceId) return;
+    // Parse email content into tasks (split by newlines)
+    const lines = emailTaskContent
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+    if (lines.length === 0) return;
+    lines.forEach((title) => {
+      createTask.mutate({ title, workspaceId });
+    });
+    setEmailTaskContent("");
+    setEmailFrom("");
+    setShowEmailTasks(false);
+    toast.success(`${lines.length} task${lines.length > 1 ? "s" : ""} created from email`);
+  };
+
   const now = useMemo(() => (mounted ? new Date() : null), [mounted]);
 
   const formatDate = (date: string | Date | null) => {
@@ -137,16 +338,30 @@ export function MyTasksContent() {
     return new Date(date) < now;
   };
 
+  // Filter for approvals and status
+  const filteredTasks = useMemo(() => {
+    let result = tasks;
+    if (showApprovals) {
+      result = result?.filter((t) => (t as any).isApproval === true);
+    }
+    if (statusFilter === "incomplete") {
+      result = result?.filter((t) => t.status !== "COMPLETE");
+    } else if (statusFilter === "completed") {
+      result = result?.filter((t) => t.status === "COMPLETE");
+    }
+    return result;
+  }, [tasks, showApprovals, statusFilter]);
+
   // Group by section: Recently assigned, Today, Upcoming
   const todayEnd = now ? new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) : null;
 
   const overdueTasks = now
-    ? tasks?.filter(
+    ? filteredTasks?.filter(
         (t) => t.status === "INCOMPLETE" && t.dueDate && new Date(t.dueDate) < now
       ) || []
     : [];
   const todayTasks = now && todayEnd
-    ? tasks?.filter(
+    ? filteredTasks?.filter(
         (t) =>
           t.status === "INCOMPLETE" &&
           t.dueDate &&
@@ -155,13 +370,13 @@ export function MyTasksContent() {
       ) || []
     : [];
   const upcomingTasks = todayEnd
-    ? tasks?.filter(
+    ? filteredTasks?.filter(
         (t) =>
           t.status === "INCOMPLETE" &&
           (!t.dueDate || new Date(t.dueDate) >= todayEnd)
       ) || []
-    : tasks?.filter((t) => t.status === "INCOMPLETE") || [];
-  const completedTasks = tasks?.filter((t) => t.status === "COMPLETE") || [];
+    : filteredTasks?.filter((t) => t.status === "INCOMPLETE") || [];
+  const completedTasks = filteredTasks?.filter((t) => t.status === "COMPLETE") || [];
 
   const sections = [
     { label: "Overdue", tasks: overdueTasks, color: "text-red-600" },
@@ -184,27 +399,31 @@ export function MyTasksContent() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-52">
-                <DropdownMenuItem onClick={() => document.dispatchEvent(new CustomEvent("quick-add-task"))}>
+                <DropdownMenuItem onClick={() => window.dispatchEvent(new CustomEvent("quick-add-task"))}>
                   <Plus className="mr-2 h-3.5 w-3.5" />
                   Quick add task
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => toast.info("Showing approvals...")}>
+                <DropdownMenuItem onClick={() => setShowApprovals(!showApprovals)}>
                   <ShieldCheck className="mr-2 h-3.5 w-3.5" />
-                  View approvals
+                  {showApprovals ? "Show all tasks" : "View approvals"}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => toast.info("AI task creation...")}>
+                <DropdownMenuItem onClick={() => setShowAiCreator(true)}>
                   <Sparkles className="mr-2 h-3.5 w-3.5" />
                   Add tasks via AI
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => toast.info("Email task import...")}>
-                  <Mail className="mr-2 h-3.5 w-3.5" />
-                  Add tasks via email
-                </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => toast.info("Sync/export options...")}>
+                <DropdownMenuItem onClick={handleExportCSV}>
                   <Download className="mr-2 h-3.5 w-3.5" />
-                  Sync / Export
+                  Export as CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handlePrint}>
+                  <Printer className="mr-2 h-3.5 w-3.5" />
+                  Print tasks
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleExportGoogleSheets}>
+                  <Table className="mr-2 h-3.5 w-3.5" />
+                  Export for Google Sheets
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -216,18 +435,21 @@ export function MyTasksContent() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => document.dispatchEvent(new CustomEvent("quick-add-task"))}>
+              <DropdownMenuItem onClick={() => window.dispatchEvent(new CustomEvent("quick-add-task"))}>
                 Create task
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => toast.info("Showing all approvals...")}>
-                View approvals
+              <DropdownMenuItem onClick={() => setShowApprovals(!showApprovals)}>
+                {showApprovals ? "Show all tasks" : "View approvals"}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => toast.info("Filtering incomplete tasks...")}>
+              <DropdownMenuItem onClick={() => setStatusFilter("incomplete")}>
                 Show incomplete only
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => toast.info("Filtering completed tasks...")}>
+              <DropdownMenuItem onClick={() => setStatusFilter("completed")}>
                 Show completed only
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setStatusFilter("all")}>
+                Show all tasks
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -261,6 +483,72 @@ export function MyTasksContent() {
         <div className="p-6">
           {viewMode === "list" && (
             <>
+              {/* Inline Add Task Form */}
+              {showAddTask && (
+                <div className="mb-4 rounded-lg border bg-white p-3 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <Circle className="h-4 w-4 text-[#cfcbcb] shrink-0" />
+                    <input
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && newTaskTitle.trim()) {
+                          createTask.mutate({
+                            title: newTaskTitle.trim(),
+                            workspaceId,
+                            dueDate: newTaskDueDate ? new Date(newTaskDueDate + "T00:00:00.000Z").toISOString() : undefined,
+                          });
+                        }
+                        if (e.key === "Escape") {
+                          setShowAddTask(false);
+                          setNewTaskTitle("");
+                          setNewTaskDueDate("");
+                        }
+                      }}
+                      placeholder="Write a task name, press Enter to save"
+                      className="flex-1 text-sm border-none bg-transparent px-0 outline-none focus:ring-0"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={newTaskDueDate}
+                      onChange={(e) => setNewTaskDueDate(e.target.value)}
+                      className="h-7 rounded border px-2 text-xs text-muted-foreground"
+                    />
+                    <Button
+                      size="sm"
+                      className="h-7 bg-[#4573D2] hover:bg-[#3A63B8] text-xs"
+                      disabled={!newTaskTitle.trim() || createTask.isPending}
+                      onClick={() => {
+                        if (newTaskTitle.trim()) {
+                          createTask.mutate({
+                            title: newTaskTitle.trim(),
+                            workspaceId,
+                            dueDate: newTaskDueDate ? new Date(newTaskDueDate + "T00:00:00.000Z").toISOString() : undefined,
+                          });
+                        }
+                      }}
+                    >
+                      {createTask.isPending ? "Adding..." : "Add task"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        setShowAddTask(false);
+                        setNewTaskTitle("");
+                        setNewTaskDueDate("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {!tasks || tasks.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-muted/30">
@@ -273,6 +561,14 @@ export function MyTasksContent() {
                     Track your work by adding tasks. Organize them into sections and
                     set due dates.
                   </p>
+                  <Button
+                    className="mt-4 gap-1.5 bg-[#4573D2] hover:bg-[#3A63B8]"
+                    size="sm"
+                    onClick={() => setShowAddTask(true)}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add task
+                  </Button>
                 </div>
               ) : (
                 <div className="space-y-6">
@@ -314,13 +610,17 @@ export function MyTasksContent() {
                             </button>
                             <button
                               className={cn(
-                                "flex-1 text-left text-sm",
+                                "flex-1 text-left text-sm flex items-center gap-1.5",
                                 task.status === "COMPLETE" &&
                                   "text-muted-foreground line-through"
                               )}
                               onClick={() => setSelectedTaskId(task.id)}
                             >
+                              {(task as any).isMilestone && <Diamond className="h-3.5 w-3.5 text-amber-500 shrink-0" />}
                               {task.title}
+                              {(task as any).isApproval && (
+                                <span className="ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-medium text-blue-700">Approval</span>
+                              )}
                             </button>
                             {task.taskProjects?.[0] && (
                               <span className="mr-4 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
@@ -342,6 +642,72 @@ export function MyTasksContent() {
                             )}
                           </div>
                         ))}
+
+                        {/* Inline Add Task per section */}
+                        {addingInSection === section.label ? (
+                          <div className="mt-1 rounded-lg border bg-white p-2.5 shadow-sm">
+                            <div className="flex items-center gap-2">
+                              <Circle className="h-4 w-4 text-[#cfcbcb] shrink-0" />
+                              <input
+                                value={sectionTaskTitle}
+                                onChange={(e) => setSectionTaskTitle(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && sectionTaskTitle.trim()) {
+                                    handleSectionAddTask(section.label);
+                                  }
+                                  if (e.key === "Escape") {
+                                    setAddingInSection(null);
+                                    setSectionTaskTitle("");
+                                    setSectionTaskDueDate("");
+                                  }
+                                }}
+                                placeholder="Write a task name, press Enter to save"
+                                className="flex-1 text-sm border-none bg-transparent px-0 outline-none focus:ring-0"
+                                autoFocus
+                              />
+                            </div>
+                            <div className="mt-2 flex items-center gap-2 pl-6">
+                              <input
+                                type="date"
+                                value={sectionTaskDueDate}
+                                onChange={(e) => setSectionTaskDueDate(e.target.value)}
+                                className="h-7 rounded border px-2 text-xs text-muted-foreground"
+                              />
+                              <Button
+                                size="sm"
+                                className="h-7 bg-[#4573D2] hover:bg-[#3A63B8] text-xs"
+                                disabled={!sectionTaskTitle.trim() || createTask.isPending}
+                                onClick={() => handleSectionAddTask(section.label)}
+                              >
+                                {createTask.isPending ? "Adding..." : "Add task"}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => {
+                                  setAddingInSection(null);
+                                  setSectionTaskTitle("");
+                                  setSectionTaskDueDate("");
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setAddingInSection(section.label);
+                              setSectionTaskTitle("");
+                              setSectionTaskDueDate("");
+                            }}
+                            className="mt-1 flex w-full items-center gap-2 rounded py-1.5 text-sm text-muted-foreground hover:text-[#4573D2]"
+                          >
+                            <Plus className="h-4 w-4" />
+                            Add task
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -465,8 +831,8 @@ export function MyTasksContent() {
       </div>
 
       <Button
-        className="fixed bottom-6 right-6 gap-1.5 rounded-full bg-[#4573D2] px-4 py-2 shadow-lg hover:bg-[#3A63B8]"
-        onClick={() => document.dispatchEvent(new CustomEvent("quick-add-task"))}
+        className="fixed bottom-6 right-6 z-10 gap-1.5 rounded-full bg-[#4573D2] px-4 py-2 shadow-lg hover:bg-[#3A63B8]"
+        onClick={() => setShowAddTask(true)}
       >
         <Plus className="h-4 w-4" />
         Add task
@@ -478,6 +844,14 @@ export function MyTasksContent() {
           onClose={() => setSelectedTaskId(null)}
         />
       )}
+
+      <FollowUpTaskDialog
+        open={followUpOpen}
+        onOpenChange={setFollowUpOpen}
+        originalTaskId={followUpTaskId}
+        originalTaskTitle={followUpTaskTitle}
+        workspaceId={workspaceId}
+      />
 
       {/* Right-click Context Menu */}
       {contextMenu && (
@@ -511,25 +885,30 @@ export function MyTasksContent() {
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
-              markAsApproval.mutate({ id: contextMenu.taskId, isApproval: true });
+              const task = tasks?.find(t => t.id === contextMenu.taskId);
+              markAsApproval.mutate({ id: contextMenu.taskId, isApproval: !(task as any)?.isApproval });
               setContextMenu(null);
             }}
           >
-            <ShieldCheck className="h-3.5 w-3.5" /> Mark as approval
+            <ShieldCheck className="h-3.5 w-3.5" /> {(tasks?.find(t => t.id === contextMenu.taskId) as any)?.isApproval ? "Remove approval" : "Mark as approval"}
           </button>
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
-              toast.success("Marked as milestone");
+              const task = tasks?.find(t => t.id === contextMenu.taskId);
+              toggleMilestone.mutate({ id: contextMenu.taskId, isMilestone: !(task as any)?.isMilestone });
               setContextMenu(null);
             }}
           >
-            <Flag className="h-3.5 w-3.5" /> Mark as milestone
+            <Diamond className="h-3.5 w-3.5" /> {(tasks?.find(t => t.id === contextMenu.taskId) as any)?.isMilestone ? "Remove milestone" : "Mark as milestone"}
           </button>
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
-              toast.success("Follow up task created");
+              const task = tasks?.find(t => t.id === contextMenu.taskId);
+              setFollowUpTaskId(contextMenu.taskId);
+              setFollowUpTaskTitle(task?.title ?? "");
+              setFollowUpOpen(true);
               setContextMenu(null);
             }}
           >
@@ -593,6 +972,200 @@ export function MyTasksContent() {
           </button>
         </div>
       )}
+
+      {/* AI Task Creator Dialog */}
+      <Dialog open={showAiCreator} onOpenChange={setShowAiCreator}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-purple-500" />
+              Add Tasks via AI
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label className="text-sm text-muted-foreground">
+                Describe what you need to accomplish and AI will generate tasks for you
+              </Label>
+              <Textarea
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder="e.g., Plan a marketing campaign for product launch, Build a new landing page, Design a mobile app..."
+                className="mt-2 min-h-[80px]"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleAiGenerate();
+                  }
+                }}
+              />
+            </div>
+            <Button
+              onClick={handleAiGenerate}
+              disabled={!aiPrompt.trim() || aiLoading}
+              className="w-full gap-2 bg-purple-600 hover:bg-purple-700"
+            >
+              {aiLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Generating tasks...
+                </>
+              ) : (
+                <>
+                  <Wand2 className="h-4 w-4" />
+                  Generate Tasks
+                </>
+              )}
+            </Button>
+
+            {aiGeneratedTasks.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Generated Tasks ({aiGeneratedTasks.length})</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-muted-foreground"
+                    onClick={() => setAiGeneratedTasks([])}
+                  >
+                    Clear all
+                  </Button>
+                </div>
+                <div className="max-h-[200px] space-y-1 overflow-y-auto rounded-lg border p-2">
+                  {aiGeneratedTasks.map((task, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2">
+                      <Circle className="h-3.5 w-3.5 text-[#cfcbcb] shrink-0" />
+                      <span className="flex-1 text-sm">{task}</span>
+                      <button
+                        onClick={() => setAiGeneratedTasks((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleAddAiTasks}
+                    disabled={createTask.isPending}
+                    className="flex-1 gap-2 bg-[#4573D2] hover:bg-[#3A63B8]"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add {aiGeneratedTasks.length} task{aiGeneratedTasks.length > 1 ? "s" : ""}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setAiGeneratedTasks([]);
+                      setAiPrompt("");
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Tasks via Email Dialog */}
+      <Dialog open={showEmailTasks} onOpenChange={setShowEmailTasks}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5 text-blue-500" />
+              Add Tasks via Email
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Email forwarding address */}
+            <div className="rounded-lg border border-dashed bg-blue-50 p-3">
+              <p className="text-xs font-medium text-blue-700">Your task email address</p>
+              <div className="mt-1 flex items-center gap-2">
+                <code className="flex-1 rounded bg-white px-2 py-1 text-xs text-blue-800 border">
+                  tasks+{workspaceId?.slice(0, 8) ?? "workspace"}@asana-clone.app
+                </code>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`tasks+${workspaceId?.slice(0, 8) ?? "workspace"}@asana-clone.app`);
+                    toast.success("Email address copied to clipboard");
+                  }}
+                >
+                  <Copy className="h-3 w-3" />
+                </Button>
+              </div>
+              <p className="mt-1.5 text-[10px] text-blue-600">
+                Forward emails to this address to automatically create tasks
+              </p>
+            </div>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white px-2 text-muted-foreground">or paste email content</span>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="email-from">From (optional)</Label>
+              <Input
+                id="email-from"
+                type="email"
+                value={emailFrom}
+                onChange={(e) => setEmailFrom(e.target.value)}
+                placeholder="sender@example.com"
+                className="mt-1"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="email-content">
+                Email content <span className="text-muted-foreground text-xs">(one task per line)</span>
+              </Label>
+              <Textarea
+                id="email-content"
+                value={emailTaskContent}
+                onChange={(e) => setEmailTaskContent(e.target.value)}
+                placeholder={"Review Q4 budget report\nSchedule team standup\nPrepare presentation slides\nSend follow-up to client"}
+                className="mt-1 min-h-[120px] font-mono text-sm"
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {emailTaskContent.split("\n").filter((l) => l.trim()).length} task{emailTaskContent.split("\n").filter((l) => l.trim()).length !== 1 ? "s" : ""} detected
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowEmailTasks(false);
+                    setEmailTaskContent("");
+                    setEmailFrom("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleEmailTaskSubmit}
+                  disabled={!emailTaskContent.trim() || createTask.isPending}
+                  className="gap-2 bg-[#4573D2] hover:bg-[#3A63B8]"
+                >
+                  <Send className="h-4 w-4" />
+                  Create Tasks
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -4,9 +4,11 @@ import { useState, useEffect, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useRouter } from "next/navigation";
 import {
   Archive,
   Bell,
+  Briefcase,
   CheckCircle2,
   MailOpen,
   MessageSquare,
@@ -28,6 +30,7 @@ const NOTIFICATION_ICONS: Record<string, React.ReactNode> = {
   TASK_OVERDUE: <AlertCircle className="h-4 w-4 text-red-600" />,
   FOLLOWER_ADDED: <UserPlus className="h-4 w-4 text-[#4573D2]" />,
   APPROVAL_REQUEST: <CheckCircle2 className="h-4 w-4 text-[#AA62E3]" />,
+  PORTFOLIO_SHARED: <Briefcase className="h-4 w-4 text-[#4573D2]" />,
 };
 
 function formatTime(date: Date | string, now: Date | null) {
@@ -51,6 +54,7 @@ export default function InboxPage() {
   useEffect(() => { setMounted(true); }, []);
   const now = useMemo(() => (mounted ? new Date() : null), [mounted]);
 
+  const router = useRouter();
   const { data, isLoading } = trpc.notifications.list.useQuery({ filter });
   const { data: unreadCount } = trpc.notifications.unreadCount.useQuery();
   const utils = trpc.useUtils();
@@ -162,6 +166,13 @@ export default function InboxPage() {
               onClick={() => {
                 if (!notification.isRead) {
                   markRead.mutate({ id: notification.id });
+                }
+                if (notification.resourceType === "portfolio") {
+                  router.push(`/portfolios/${notification.resourceId}`);
+                } else if (notification.resourceType === "task") {
+                  router.push(`/my-tasks?task=${notification.resourceId}`);
+                } else if (notification.resourceType === "project") {
+                  router.push(`/projects/${notification.resourceId}`);
                 }
               }}
             >

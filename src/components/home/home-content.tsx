@@ -63,8 +63,14 @@ import {
   Heading2,
   Type,
   SeparatorHorizontal,
+  Briefcase,
+  FolderKanban,
+  ArrowDownAZ,
+  Clock3,
+  TrendingUp,
 } from "lucide-react";
 import { OnboardingWizard } from "@/components/onboarding/onboarding-wizard";
+import { FollowUpTaskDialog } from "@/components/task/follow-up-task-dialog";
 
 type WidgetKey = "myTasks" | "projects" | "assignedTasks" | "goals" | "statusUpdates" | "portfolios" | "draftComments" | "forms" | "mentioningMe" | "privateNotepad";
 interface WidgetConfig {
@@ -73,13 +79,15 @@ interface WidgetConfig {
   visible: boolean;
 }
 
+type WorkSortMode = "alphabetical" | "recent" | "top";
+
 const DEFAULT_WIDGETS: WidgetConfig[] = [
   { key: "myTasks", label: "My Tasks", visible: true },
   { key: "projects", label: "Projects", visible: true },
   { key: "assignedTasks", label: "Tasks I've Assigned", visible: true },
   { key: "goals", label: "Goals", visible: true },
   { key: "statusUpdates", label: "Status Updates", visible: false },
-  { key: "portfolios", label: "Portfolios", visible: false },
+  { key: "portfolios", label: "Portfolios", visible: true },
   { key: "draftComments", label: "Draft Comments", visible: false },
   { key: "forms", label: "Forms", visible: false },
   { key: "mentioningMe", label: "Comments Mentioning Me", visible: false },
@@ -99,6 +107,17 @@ export function HomeContent() {
   const [showInsertMenu, setShowInsertMenu] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [widgetSizes, setWidgetSizes] = useState<Record<string, "half" | "full">>({});
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [followUpTaskId, setFollowUpTaskId] = useState("");
+  const [followUpTaskTitle, setFollowUpTaskTitle] = useState("");
+  const [ctxAddProjectOpen, setCtxAddProjectOpen] = useState(false);
+  const [ctxAssignOpen, setCtxAssignOpen] = useState(false);
+  const [ctxTargetTaskId, setCtxTargetTaskId] = useState("");
+  const [notepadValue, setNotepadValue] = useState("");
+  const notepadTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [assignTaskAssigneeId, setAssignTaskAssigneeId] = useState("");
+  const [assignTaskProjectId, setAssignTaskProjectId] = useState("");
+  const [workSortMode, setWorkSortMode] = useState<WorkSortMode>("recent");
 
   useEffect(() => {
     const handler = () => setContextMenu(null);
@@ -162,12 +181,71 @@ export function HomeContent() {
     { enabled: !!workspaceId }
   );
 
+  const { data: portfolios } = trpc.portfolios.list.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
+
   const { data: goals } = trpc.goals.list.useQuery(
     { workspaceId: workspaceId! },
     { enabled: !!workspaceId }
   );
 
+  const { data: notepadData } = trpc.auth.getPrivateNotepad.useQuery();
+  const updateNotepad = trpc.auth.updatePrivateNotepad.useMutation();
+  const { data: members } = trpc.workspaces.getMembers.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
+
+  useEffect(() => {
+    if (notepadData?.notepad !== undefined) {
+      setNotepadValue(notepadData.notepad);
+    }
+  }, [notepadData]);
+
+  const handleNotepadChange = (value: string) => {
+    setNotepadValue(value);
+    if (notepadTimerRef.current) clearTimeout(notepadTimerRef.current);
+    notepadTimerRef.current = setTimeout(() => {
+      updateNotepad.mutate({ notepad: value });
+    }, 1000);
+  };
+
   const router = useRouter();
+
+  const toggleMilestone = trpc.tasks.toggleMilestone.useMutation({
+    onSuccess: () => {
+      if (workspaceId) utils.tasks.myTasks.invalidate({ workspaceId });
+    },
+  });
+
+  const updateTask = trpc.tasks.update.useMutation({
+    onSuccess: () => {
+      if (workspaceId) utils.tasks.myTasks.invalidate({ workspaceId });
+    },
+  });
+
+  const createAssignedTask = trpc.tasks.create.useMutation({
+    onSuccess: () => {
+      if (workspaceId) utils.tasks.myTasks.invalidate({ workspaceId });
+      toast.success("Task assigned successfully");
+      setAssignTaskName("");
+      setAssignTaskBody("");
+      setAssignTaskDueDate("");
+      setAssignTaskAssigneeId("");
+      setAssignTaskProjectId("");
+      setAssignTaskOpen(false);
+    },
+  });
+
+  const addToProject = trpc.tasks.addToProject.useMutation({
+    onSuccess: () => {
+      if (workspaceId) utils.tasks.myTasks.invalidate({ workspaceId });
+      toast.success("Added to project");
+      setCtxAddProjectOpen(false);
+    },
+  });
 
   const completeTask = trpc.tasks.complete.useMutation({
     onSuccess: () => {
@@ -182,8 +260,39 @@ export function HomeContent() {
     ? incompleteTasks.filter((t) => t.dueDate && new Date(t.dueDate) < now)
     : [];
   const upcomingTasks = now
-    ? incompleteTasks.filter((t) => !t.dueDate || new Date(t.dueDate) >= now)
-    : incompleteTasks;
+    ? incompleteTasks.filter((t) => t.dueDate && new Date(t.dueDate) >= now)
+    : [];
+
+  // Sorted projects and portfolios for Work section
+  const sortedProjects = useMemo(() => {
+    if (!projects) return [];
+    const items = [...projects];
+    switch (workSortMode) {
+      case "alphabetical":
+        return items.sort((a, b) => a.name.localeCompare(b.name));
+      case "recent":
+        return items.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      case "top":
+        return items.sort((a, b) => (b._count?.taskProjects ?? 0) - (a._count?.taskProjects ?? 0));
+      default:
+        return items;
+    }
+  }, [projects, workSortMode]);
+
+  const sortedPortfolios = useMemo(() => {
+    if (!portfolios) return [];
+    const items = [...portfolios];
+    switch (workSortMode) {
+      case "alphabetical":
+        return items.sort((a, b) => a.name.localeCompare(b.name));
+      case "recent":
+        return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      case "top":
+        return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      default:
+        return items;
+    }
+  }, [portfolios, workSortMode]);
 
   const formatDate = (date: string | Date | null) => {
     if (!date || !now) return "";
@@ -239,7 +348,7 @@ export function HomeContent() {
   // Widget rendering map
   const widgetRenderers: Record<WidgetKey, () => React.ReactNode> = {
     myTasks: () => (
-      <Card key="myTasks" className="border shadow-sm">
+      <Card key="myTasks" className={cn("border shadow-sm", widgetSizes.myTasks === "full" && "col-span-2")}>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-base font-medium">
             <Link href="/my-tasks" className="hover:text-[#4573D2]">My tasks</Link>
@@ -249,15 +358,15 @@ export function HomeContent() {
               <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => document.dispatchEvent(new CustomEvent("quick-add-task"))}>
+              <DropdownMenuItem onClick={() => window.dispatchEvent(new CustomEvent("quick-add-task"))}>
                 Create task
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => router.push("/my-tasks")}>
                 View all my tasks
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>Half size</DropdownMenuItem>
-              <DropdownMenuItem>Full size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, myTasks: "half" }))}>Half size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, myTasks: "full" }))}>Full size</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-destructive" onClick={() => toggleWidget("myTasks")}>Remove widget</DropdownMenuItem>
             </DropdownMenuContent>
@@ -303,7 +412,7 @@ export function HomeContent() {
       </Card>
     ),
     projects: () => (
-      <Card key="projects" className="border shadow-sm">
+      <Card key="projects" className={cn("border shadow-sm", widgetSizes.projects === "full" && "col-span-2")}>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-base font-medium">Projects</CardTitle>
           <div className="flex items-center gap-1">
@@ -321,7 +430,7 @@ export function HomeContent() {
                   {project.name.substring(0, 2).toUpperCase()}
                 </div>
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-[#1e1f21]">{project.name}</p>
+                  <p className="text-sm font-medium text-[#1e1f21] dark:text-foreground">{project.name}</p>
                   {project.team && <p className="text-xs text-muted-foreground">{project.team.name}</p>}
                 </div>
               </Link>
@@ -391,7 +500,7 @@ export function HomeContent() {
         CLOSED: "Closed",
       };
       return (
-        <Card key="goals" className="border shadow-sm">
+        <Card key="goals" className={cn("border shadow-sm", widgetSizes.goals === "full" && "col-span-2")}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-base font-medium">
               <Link href="/goals" className="hover:text-[#4573D2]">Goals</Link>
@@ -424,7 +533,7 @@ export function HomeContent() {
                     <Link key={goal.id} href={`/goals/${goal.id}`} className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-muted/50">
                       <Target className="h-4 w-4 shrink-0" style={{ color: STATUS_COLORS[goal.status] || "#6D6E6F" }} />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-[#1e1f21] truncate">{goal.name}</p>
+                        <p className="text-sm font-medium text-[#1e1f21] dark:text-foreground truncate">{goal.name}</p>
                         <div className="mt-1 flex items-center gap-2">
                           <div className="h-1.5 flex-1 rounded-full bg-gray-100">
                             <div
@@ -461,7 +570,7 @@ export function HomeContent() {
       );
     },
     statusUpdates: () => (
-      <Card key="statusUpdates" className="border shadow-sm">
+      <Card key="statusUpdates" className={cn("border shadow-sm", widgetSizes.statusUpdates === "full" && "col-span-2")}>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-base font-medium">Status Updates</CardTitle>
           <DropdownMenu>
@@ -469,8 +578,8 @@ export function HomeContent() {
               <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>Half size</DropdownMenuItem>
-              <DropdownMenuItem>Full size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, statusUpdates: "half" }))}>Half size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, statusUpdates: "full" }))}>Full size</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-destructive" onClick={() => toggleWidget("statusUpdates")}>Remove widget</DropdownMenuItem>
             </DropdownMenuContent>
@@ -484,30 +593,63 @@ export function HomeContent() {
       </Card>
     ),
     portfolios: () => (
-      <Card key="portfolios" className="border shadow-sm">
+      <Card key="portfolios" className={cn("border shadow-sm", widgetSizes.portfolios === "full" && "col-span-2")}>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-base font-medium">Portfolios</CardTitle>
+          <CardTitle className="text-base font-medium">
+            <Link href="/portfolios" className="hover:text-[#4573D2]">Portfolios</Link>
+          </CardTitle>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>Half size</DropdownMenuItem>
-              <DropdownMenuItem>Full size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push("/portfolios")}>
+                Create portfolio
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push("/portfolios")}>
+                View all portfolios
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, portfolios: "half" }))}>Half size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, portfolios: "full" }))}>Full size</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-destructive" onClick={() => toggleWidget("portfolios")}>Remove widget</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col items-center justify-center py-8 text-center">
-            <p className="text-sm text-muted-foreground">No portfolios yet</p>
-          </div>
+          {portfolios && portfolios.length > 0 ? (
+            <div className="space-y-2">
+              {portfolios.slice(0, 5).map((portfolio) => (
+                <Link key={portfolio.id} href={`/portfolios/${portfolio.id}`} className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-muted/50">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#4573D2] text-sm font-medium text-white">
+                    <Briefcase className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-[#1e1f21] dark:text-foreground truncate">{portfolio.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {portfolio.projects?.length ?? 0} project{(portfolio.projects?.length ?? 0) !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+              {portfolios.length > 5 && (
+                <Link href="/portfolios" className="block text-center text-xs text-[#4573D2] hover:underline">
+                  View all {portfolios.length} portfolios
+                </Link>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <p className="text-sm text-muted-foreground">No portfolios yet</p>
+              <Link href="/portfolios" className="mt-2 text-xs text-[#4573D2] hover:underline">Create a portfolio</Link>
+            </div>
+          )}
         </CardContent>
       </Card>
     ),
     draftComments: () => (
-      <Card key="draftComments" className="border shadow-sm">
+      <Card key="draftComments" className={cn("border shadow-sm", widgetSizes.draftComments === "full" && "col-span-2")}>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-base font-medium">Draft Comments</CardTitle>
           <DropdownMenu>
@@ -515,8 +657,8 @@ export function HomeContent() {
               <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>Half size</DropdownMenuItem>
-              <DropdownMenuItem>Full size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, draftComments: "half" }))}>Half size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, draftComments: "full" }))}>Full size</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-destructive" onClick={() => toggleWidget("draftComments")}>Remove widget</DropdownMenuItem>
             </DropdownMenuContent>
@@ -530,7 +672,7 @@ export function HomeContent() {
       </Card>
     ),
     forms: () => (
-      <Card key="forms" className="border shadow-sm">
+      <Card key="forms" className={cn("border shadow-sm", widgetSizes.forms === "full" && "col-span-2")}>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-base font-medium">Forms</CardTitle>
           <DropdownMenu>
@@ -538,8 +680,8 @@ export function HomeContent() {
               <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>Half size</DropdownMenuItem>
-              <DropdownMenuItem>Full size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, forms: "half" }))}>Half size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, forms: "full" }))}>Full size</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-destructive" onClick={() => toggleWidget("forms")}>Remove widget</DropdownMenuItem>
             </DropdownMenuContent>
@@ -553,7 +695,7 @@ export function HomeContent() {
       </Card>
     ),
     mentioningMe: () => (
-      <Card key="mentioningMe" className="border shadow-sm">
+      <Card key="mentioningMe" className={cn("border shadow-sm", widgetSizes.mentioningMe === "full" && "col-span-2")}>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-base font-medium">Comments Mentioning Me</CardTitle>
           <DropdownMenu>
@@ -561,8 +703,8 @@ export function HomeContent() {
               <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>Half size</DropdownMenuItem>
-              <DropdownMenuItem>Full size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, mentioningMe: "half" }))}>Half size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, mentioningMe: "full" }))}>Full size</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-destructive" onClick={() => toggleWidget("mentioningMe")}>Remove widget</DropdownMenuItem>
             </DropdownMenuContent>
@@ -576,7 +718,7 @@ export function HomeContent() {
       </Card>
     ),
     privateNotepad: () => (
-      <Card key="privateNotepad" className="border shadow-sm">
+      <Card key="privateNotepad" className={cn("border shadow-sm", widgetSizes.privateNotepad === "full" && "col-span-2")}>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-base font-medium">Private Notepad</CardTitle>
           <DropdownMenu>
@@ -584,18 +726,29 @@ export function HomeContent() {
               <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem>Half size</DropdownMenuItem>
-              <DropdownMenuItem>Full size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, privateNotepad: "half" }))}>Half size</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWidgetSizes(prev => ({ ...prev, privateNotepad: "full" }))}>Full size</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-destructive" onClick={() => toggleWidget("privateNotepad")}>Remove widget</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </CardHeader>
         <CardContent>
-          <textarea className="w-full min-h-[100px] resize-none rounded border-none bg-muted/30 p-3 text-sm focus:outline-none focus:ring-1 focus:ring-[#4573D2]" placeholder="Jot down notes, ideas, or reminders..." />
+          <textarea
+            className="w-full min-h-[100px] resize-none rounded border-none bg-muted/30 p-3 text-sm focus:outline-none focus:ring-1 focus:ring-[#4573D2]"
+            placeholder="Jot down notes, ideas, or reminders..."
+            value={notepadValue}
+            onChange={(e) => handleNotepadChange(e.target.value)}
+          />
         </CardContent>
       </Card>
     ),
+  };
+
+  const sortLabel: Record<WorkSortMode, string> = {
+    alphabetical: "Alphabetical",
+    recent: "Recent",
+    top: "Top",
   };
 
   return (
@@ -604,12 +757,12 @@ export function HomeContent() {
       <div className="flex items-center gap-4 text-sm text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <CheckCircle2 className="h-4 w-4 text-green-600" />
-          <strong className="text-[#1e1f21]">{completedTasks.length}</strong>{" "}
+          <strong className="text-[#1e1f21] dark:text-foreground">{completedTasks.length}</strong>{" "}
           tasks completed
         </span>
         <span className="flex items-center gap-1.5">
           <Users className="h-4 w-4" />
-          <strong className="text-[#1e1f21]">0</strong> collaborators
+          <strong className="text-[#1e1f21] dark:text-foreground">0</strong> collaborators
         </span>
         <Button
           variant="ghost"
@@ -692,8 +845,33 @@ export function HomeContent() {
                 autoFocus
               />
             </div>
-            <div className="text-xs text-muted-foreground">
-              For <strong>assignee name</strong> in <strong>project name</strong>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] font-medium text-muted-foreground">Assignee</label>
+                <select
+                  value={assignTaskAssigneeId}
+                  onChange={(e) => setAssignTaskAssigneeId(e.target.value)}
+                  className="flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="">Select assignee...</option>
+                  {members?.map((m) => (
+                    <option key={m.user.id} value={m.user.id}>{m.user.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-medium text-muted-foreground">Project</label>
+                <select
+                  value={assignTaskProjectId}
+                  onChange={(e) => setAssignTaskProjectId(e.target.value)}
+                  className="flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="">Select project...</option>
+                  {projects?.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="space-y-2">
               <Textarea
@@ -740,7 +918,7 @@ export function HomeContent() {
                     Insert
                   </button>
                   {showInsertMenu && (
-                    <div className="absolute right-0 bottom-8 z-50 w-48 rounded-md border bg-white py-1 shadow-lg">
+                    <div className="absolute right-0 bottom-8 z-50 w-48 rounded-md border bg-white py-1 shadow-lg dark:bg-card">
                       {[
                         { label: "Paragraph", icon: Type },
                         { label: "Heading 1", icon: Heading1 },
@@ -815,19 +993,23 @@ export function HomeContent() {
                 <Button
                   size="sm"
                   className="bg-[#4573D2] hover:bg-[#3A63B8]"
+                  disabled={createAssignedTask.isPending}
                   onClick={() => {
                     if (assignTaskName.trim()) {
-                      toast.success(`Task "${assignTaskName}" assigned`);
-                      setAssignTaskName("");
-                      setAssignTaskBody("");
-                      setAssignTaskDueDate("");
-                      setAssignTaskOpen(false);
+                      createAssignedTask.mutate({
+                        title: assignTaskName.trim(),
+                        description: assignTaskBody || undefined,
+                        assigneeId: assignTaskAssigneeId || undefined,
+                        projectId: assignTaskProjectId || undefined,
+                        dueDate: assignTaskDueDate ? new Date(assignTaskDueDate + "T00:00:00.000Z").toISOString() : undefined,
+                        workspaceId: workspaceId,
+                      });
                     } else {
                       toast.error("Please enter a task name");
                     }
                   }}
                 >
-                  Assign task
+                  {createAssignedTask.isPending ? "Assigning..." : "Assign task"}
                 </Button>
               </div>
             </div>
@@ -854,6 +1036,8 @@ export function HomeContent() {
                 setAssignTaskName("");
                 setAssignTaskBody("");
                 setAssignTaskDueDate("");
+                setAssignTaskAssigneeId("");
+                setAssignTaskProjectId("");
                 setAssignTaskOpen(false);
                 setShowCloseConfirm(false);
               }}
@@ -864,11 +1048,20 @@ export function HomeContent() {
         </DialogContent>
       </Dialog>
 
+      {/* Add assignee selector to assign task dialog */}
+      <FollowUpTaskDialog
+        open={followUpOpen}
+        onOpenChange={setFollowUpOpen}
+        originalTaskId={followUpTaskId}
+        originalTaskTitle={followUpTaskTitle}
+        workspaceId={workspaceId}
+      />
+
       {/* Right-click Context Menu for tasks */}
       {contextMenu && (
         <div
           ref={contextRef}
-          className="fixed z-50 min-w-[180px] rounded-md border bg-white py-1 shadow-lg"
+          className="fixed z-50 min-w-[180px] rounded-md border bg-white py-1 shadow-lg dark:bg-card"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
@@ -897,7 +1090,8 @@ export function HomeContent() {
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
-              toast.success("Due date set to today");
+              const today = new Date(); today.setHours(0,0,0,0);
+              updateTask.mutate({ id: contextMenu.taskId, dueDate: today.toISOString() });
               setContextMenu(null);
             }}
           >
@@ -906,7 +1100,8 @@ export function HomeContent() {
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
-              toast.success("Due date set to next week");
+              const nextWeek = new Date(); nextWeek.setDate(nextWeek.getDate() + 7); nextWeek.setHours(0,0,0,0);
+              updateTask.mutate({ id: contextMenu.taskId, dueDate: nextWeek.toISOString() });
               setContextMenu(null);
             }}
           >
@@ -915,7 +1110,8 @@ export function HomeContent() {
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
-              toast.success("Due date set to 30 days from now");
+              const later = new Date(); later.setDate(later.getDate() + 30); later.setHours(0,0,0,0);
+              updateTask.mutate({ id: contextMenu.taskId, dueDate: later.toISOString() });
               setContextMenu(null);
             }}
           >
@@ -925,7 +1121,8 @@ export function HomeContent() {
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
-              toast("Select a project to add this task");
+              setCtxTargetTaskId(contextMenu.taskId);
+              setCtxAddProjectOpen(true);
               setContextMenu(null);
             }}
           >
@@ -934,7 +1131,8 @@ export function HomeContent() {
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
-              toast("Open task to assign");
+              setCtxTargetTaskId(contextMenu.taskId);
+              setCtxAssignOpen(true);
               setContextMenu(null);
             }}
           >
@@ -944,7 +1142,7 @@ export function HomeContent() {
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
-              toast.success("Marked as milestone");
+              toggleMilestone.mutate({ id: contextMenu.taskId, isMilestone: true });
               setContextMenu(null);
             }}
           >
@@ -953,12 +1151,75 @@ export function HomeContent() {
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
-              toast.success("Follow up task created");
+              const task = myTasks?.find(t => t.id === contextMenu.taskId);
+              setFollowUpTaskId(contextMenu.taskId);
+              setFollowUpTaskTitle(task?.title ?? "");
+              setFollowUpOpen(true);
               setContextMenu(null);
             }}
           >
             <RefreshCw className="h-3.5 w-3.5" /> Create follow up task
           </button>
+        </div>
+      )}
+
+      {/* Add to Project Popover */}
+      {ctxAddProjectOpen && (
+        <div className="fixed inset-0 z-50" onClick={() => setCtxAddProjectOpen(false)}>
+          <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-72 rounded-lg border bg-white p-3 shadow-xl dark:bg-card" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-medium mb-2">Add to project</h3>
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {projects?.map((p) => (
+                <button
+                  key={p.id}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
+                  onClick={() => addToProject.mutate({ taskId: ctxTargetTaskId, projectId: p.id })}
+                >
+                  <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: p.color }} />
+                  {p.name}
+                </button>
+              ))}
+              {(!projects || projects.length === 0) && (
+                <p className="text-xs text-muted-foreground py-2 text-center">No projects available</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assign to Member Popover */}
+      {ctxAssignOpen && (
+        <div className="fixed inset-0 z-50" onClick={() => setCtxAssignOpen(false)}>
+          <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-72 rounded-lg border bg-white p-3 shadow-xl dark:bg-card" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-medium mb-2">Assign to</h3>
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              <button
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50 text-muted-foreground"
+                onClick={() => {
+                  updateTask.mutate({ id: ctxTargetTaskId, assigneeId: null });
+                  setCtxAssignOpen(false);
+                }}
+              >
+                Unassigned
+              </button>
+              {members?.map((m) => (
+                <button
+                  key={m.user.id}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
+                  onClick={() => {
+                    updateTask.mutate({ id: ctxTargetTaskId, assigneeId: m.user.id });
+                    setCtxAssignOpen(false);
+                    toast.success(`Assigned to ${m.user.name}`);
+                  }}
+                >
+                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[#4573D2] text-[8px] text-white">
+                    {m.user.name?.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
+                  </div>
+                  {m.user.name}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>

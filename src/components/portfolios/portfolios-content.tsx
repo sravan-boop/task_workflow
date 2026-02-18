@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { CreatePortfolioDialog } from "@/components/portfolios/create-portfolio-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -82,7 +83,6 @@ export function PortfoliosContent() {
 
   const utils = trpc.useUtils();
   const [createOpen, setCreateOpen] = useState(false);
-  const [name, setName] = useState("");
   const [expandedPortfolios, setExpandedPortfolios] = useState<Set<string>>(new Set());
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameId, setRenameId] = useState<string | null>(null);
@@ -103,14 +103,6 @@ export function PortfoliosContent() {
     });
   };
 
-  const createPortfolio = trpc.portfolios.create.useMutation({
-    onSuccess: () => {
-      utils.portfolios.list.invalidate();
-      setCreateOpen(false);
-      setName("");
-    },
-  });
-
   const updatePortfolio = trpc.portfolios.update.useMutation({
     onSuccess: () => {
       utils.portfolios.list.invalidate();
@@ -130,16 +122,68 @@ export function PortfoliosContent() {
     onError: () => toast.error("Failed to delete portfolio"),
   });
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !workspaceId) return;
-    createPortfolio.mutate({ name: name.trim(), workspaceId });
-  };
+  const { data: workspaceMembers } = trpc.workspaces.getMembers.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
 
-  const handleShareInvite = (e: React.FormEvent) => {
+  const addMember = trpc.portfolios.addMember.useMutation({
+    onSuccess: () => {
+      toast.success(`Invitation sent to ${shareEmail} as ${shareRole}`);
+    },
+    onError: (err) => {
+      if (err.message?.includes("Unique constraint") || err.data?.code === "CONFLICT") {
+        toast.error("This member has already been added to the portfolio");
+      } else {
+        toast.error(err.message || "Failed to invite member");
+      }
+    },
+  });
+
+  const findOrInvite = trpc.workspaces.findOrInviteByEmail.useMutation();
+
+  const handleShareInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!shareEmail.trim()) return;
-    toast.success(`Invitation sent to ${shareEmail} as ${shareRole}`);
+    if (!shareEmail.trim() || !sharePortfolioId || !workspaceId) return;
+
+    // First check if already a workspace member
+    const found = workspaceMembers?.find(
+      (m) => m.user.email.toLowerCase() === shareEmail.trim().toLowerCase()
+    );
+
+    if (found) {
+      const permMap: Record<string, "ADMIN" | "EDITOR" | "COMMENTER" | "VIEWER"> = {
+        admin: "ADMIN", editor: "EDITOR", viewer: "VIEWER",
+      };
+      addMember.mutate({
+        portfolioId: sharePortfolioId,
+        userId: found.user.id,
+        permission: permMap[shareRole] || "EDITOR",
+      });
+    } else {
+      // Auto-invite to workspace first, then add to portfolio
+      try {
+        const result = await findOrInvite.mutateAsync({
+          workspaceId,
+          email: shareEmail.trim(),
+        });
+        if (result.emailSent) {
+          toast.success(`Invite email sent to ${shareEmail}. They'll have access once they join.`);
+        } else if (result.userId) {
+          const permMap: Record<string, "ADMIN" | "EDITOR" | "COMMENTER" | "VIEWER"> = {
+            admin: "ADMIN", editor: "EDITOR", viewer: "VIEWER",
+          };
+          addMember.mutate({
+            portfolioId: sharePortfolioId,
+            userId: result.userId,
+            permission: permMap[shareRole] || "EDITOR",
+          });
+          utils.workspaces.getMembers.invalidate();
+        }
+      } catch (err: any) {
+        toast.error(err.message || "Failed to invite user");
+      }
+    }
     setShareEmail("");
   };
 
@@ -170,9 +214,10 @@ export function PortfoliosContent() {
                     key={portfolio.id}
                     className="rounded-lg border bg-white shadow-sm"
                   >
-                    <button
+                    <div
+                      role="button"
                       onClick={() => togglePortfolio(portfolio.id)}
-                      className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-muted/30"
+                      className="flex w-full cursor-pointer items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-muted/30"
                     >
                       {isExpanded ? (
                         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -231,9 +276,19 @@ export function PortfoliosContent() {
                             {/* Copy portfolio link */}
                             <DropdownMenuItem
                               onClick={() => {
-                                navigator.clipboard.writeText(
-                                  window.location.origin + `/portfolios/${portfolio.id}`
-                                );
+                                const url = window.location.origin + `/portfolios/${portfolio.id}`;
+                                if (navigator.clipboard && window.isSecureContext) {
+                                  navigator.clipboard.writeText(url);
+                                } else {
+                                  const ta = document.createElement("textarea");
+                                  ta.value = url;
+                                  ta.style.position = "fixed";
+                                  ta.style.left = "-9999px";
+                                  document.body.appendChild(ta);
+                                  ta.select();
+                                  document.execCommand("copy");
+                                  document.body.removeChild(ta);
+                                }
                                 toast.success("Portfolio link copied to clipboard");
                               }}
                             >
@@ -325,7 +380,7 @@ export function PortfoliosContent() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                    </button>
+                    </div>
 
                     {isExpanded && (
                       <>
@@ -508,41 +563,11 @@ export function PortfoliosContent() {
       </div>
 
       {/* Create Dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-[420px]">
-          <DialogHeader>
-            <DialogTitle>New portfolio</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleCreate} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="portfolio-name">Portfolio name</Label>
-              <Input
-                id="portfolio-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Enter portfolio name"
-                autoFocus
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setCreateOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={!name.trim() || createPortfolio.isPending}
-                className="bg-[#4573D2] hover:bg-[#3A63B8]"
-              >
-                {createPortfolio.isPending ? "Creating..." : "Create portfolio"}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <CreatePortfolioDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        workspaceId={workspaceId}
+      />
 
       {/* Rename Dialog */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
@@ -689,9 +714,19 @@ export function PortfoliosContent() {
                 className="gap-1.5"
                 onClick={() => {
                   if (sharePortfolioId) {
-                    navigator.clipboard.writeText(
-                      window.location.origin + `/portfolios/${sharePortfolioId}`
-                    );
+                    const url = window.location.origin + `/portfolios/${sharePortfolioId}`;
+                    if (navigator.clipboard && window.isSecureContext) {
+                      navigator.clipboard.writeText(url);
+                    } else {
+                      const ta = document.createElement("textarea");
+                      ta.value = url;
+                      ta.style.position = "fixed";
+                      ta.style.left = "-9999px";
+                      document.body.appendChild(ta);
+                      ta.select();
+                      document.execCommand("copy");
+                      document.body.removeChild(ta);
+                    }
                     toast.success("Link copied to clipboard");
                   }
                 }}

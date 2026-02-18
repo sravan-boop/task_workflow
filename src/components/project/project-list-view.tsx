@@ -26,8 +26,17 @@ import {
   CalendarPlus,
   Sun,
   CalendarRange,
+  Diamond,
+  GitBranch,
+  Pencil,
+  User,
+  ListTree,
+  FileText,
 } from "lucide-react";
 import { BulkActionsToolbar } from "@/components/task/bulk-actions-toolbar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FollowUpTaskDialog } from "@/components/task/follow-up-task-dialog";
 
 export type SortRule = { field: string; order: "asc" | "desc" };
 
@@ -58,15 +67,48 @@ export function ProjectListView({
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; taskId: string } | null>(null);
   const contextRef = useRef<HTMLDivElement>(null);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [followUpTaskId, setFollowUpTaskId] = useState("");
+  const [followUpTaskTitle, setFollowUpTaskTitle] = useState("");
+  const [newTaskPriority, setNewTaskPriority] = useState("");
+  const [newTaskStatus, setNewTaskStatus] = useState("");
+  const [newTaskAssigneeId, setNewTaskAssigneeId] = useState("");
+  const [newTaskDueDate, setNewTaskDueDate] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [showInviteEmail, setShowInviteEmail] = useState(false);
+  const [renamingTaskId, setRenamingTaskId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [addToProjectTaskId, setAddToProjectTaskId] = useState<string | null>(null);
+  const [subtaskParentId, setSubtaskParentId] = useState<string | null>(null);
+  const [subtaskTitle, setSubtaskTitle] = useState("");
 
   const createTask = trpc.tasks.create.useMutation({
     onSuccess: () => {
       utils.tasks.list.invalidate({ projectId });
       utils.tasks.myTasks.invalidate();
       setNewTaskTitle("");
+      setNewTaskPriority("");
+      setNewTaskStatus("");
+      setNewTaskAssigneeId("");
+      setNewTaskDueDate("");
       setAddingTaskInSection(null);
+      setShowInviteEmail(false);
+      setInviteEmail("");
+      toast.success("Task created");
+    },
+    onError: (err) => {
+      toast.error(err.message || "Failed to create task");
     },
   });
+
+  const { data: workspaces } = trpc.workspaces.list.useQuery();
+  const workspaceId = workspaces?.[0]?.id;
+  const { data: members } = trpc.workspaces.getMembers.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
+
+  const findOrInvite = trpc.workspaces.findOrInviteByEmail.useMutation();
 
   const completeTask = trpc.tasks.complete.useMutation({
     onSuccess: (_data, variables) => {
@@ -96,20 +138,104 @@ export function ProjectListView({
   const duplicateTask = trpc.tasks.duplicate.useMutation({
     onSuccess: () => {
       utils.tasks.list.invalidate({ projectId });
+      utils.tasks.myTasks.invalidate();
       toast.success("Task duplicated");
     },
   });
 
   const markAsApproval = trpc.tasks.markAsApproval.useMutation({
-    onSuccess: () => {
+    onMutate: async (variables) => {
+      await utils.tasks.list.cancel({ projectId });
+      const previous = utils.tasks.list.getData({ projectId });
+      utils.tasks.list.setData({ projectId }, (old: any) => {
+        if (!old) return old;
+        return old.map((t: any) =>
+          t.id === variables.id
+            ? { ...t, isApproval: variables.isApproval, approvalStatus: variables.isApproval ? "PENDING" : null }
+            : t
+        );
+      });
+      return { previous };
+    },
+    onError: (_err, _variables, context: any) => {
+      if (context?.previous) {
+        utils.tasks.list.setData({ projectId }, context.previous);
+      }
+    },
+    onSettled: () => {
       utils.tasks.list.invalidate({ projectId });
-      toast.success("Marked as approval");
+    },
+    onSuccess: (_data, variables) => {
+      utils.tasks.myTasks.invalidate();
+      utils.tasks.get.invalidate({ id: variables.id });
+      const msg = variables.isApproval ? "Marked as approval" : "Approval removed";
+      toast.success(msg);
+      pushUndo(msg, () => {
+        markAsApproval.mutate({ id: variables.id, isApproval: !variables.isApproval });
+      });
     },
   });
 
   const updateTask = trpc.tasks.update.useMutation({
     onSuccess: () => {
       utils.tasks.list.invalidate({ projectId });
+      utils.tasks.myTasks.invalidate();
+    },
+  });
+
+  const { data: allProjects } = trpc.projects.list.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId }
+  );
+
+  const addToProject = trpc.tasks.addToProject.useMutation({
+    onSuccess: () => {
+      utils.tasks.list.invalidate({ projectId });
+      toast.success("Task added to project");
+      setAddToProjectTaskId(null);
+    },
+  });
+
+  const createSubtask = trpc.tasks.create.useMutation({
+    onSuccess: () => {
+      utils.tasks.list.invalidate({ projectId });
+      utils.tasks.myTasks.invalidate();
+      toast.success("Subtask created");
+      setSubtaskParentId(null);
+      setSubtaskTitle("");
+    },
+  });
+
+  const toggleMilestone = trpc.tasks.toggleMilestone.useMutation({
+    onMutate: async (variables) => {
+      await utils.tasks.list.cancel({ projectId });
+      const previous = utils.tasks.list.getData({ projectId });
+      utils.tasks.list.setData({ projectId }, (old: any) => {
+        if (!old) return old;
+        return old.map((t: any) =>
+          t.id === variables.id
+            ? { ...t, isMilestone: variables.isMilestone }
+            : t
+        );
+      });
+      return { previous };
+    },
+    onError: (_err, _variables, context: any) => {
+      if (context?.previous) {
+        utils.tasks.list.setData({ projectId }, context.previous);
+      }
+    },
+    onSettled: () => {
+      utils.tasks.list.invalidate({ projectId });
+    },
+    onSuccess: (_data, variables) => {
+      utils.tasks.myTasks.invalidate();
+      utils.tasks.get.invalidate({ id: variables.id });
+      const msg = variables.isMilestone ? "Marked as milestone" : "Milestone removed";
+      toast.success(msg);
+      pushUndo(msg, () => {
+        toggleMilestone.mutate({ id: variables.id, isMilestone: !variables.isMilestone });
+      });
     },
   });
 
@@ -200,7 +326,42 @@ export function ProjectListView({
       title: newTaskTitle.trim(),
       projectId,
       sectionId,
+      priority: (newTaskPriority as "LOW" | "MEDIUM" | "HIGH") || undefined,
+      assigneeId: newTaskAssigneeId || undefined,
+      dueDate: newTaskDueDate ? new Date(newTaskDueDate + "T00:00:00.000Z").toISOString() : undefined,
     });
+    setNewTaskPriority("");
+    setNewTaskStatus("");
+    setNewTaskAssigneeId("");
+    setNewTaskDueDate("");
+    setShowInviteEmail(false);
+    setInviteEmail("");
+  };
+
+  const handleInviteByEmail = async () => {
+    if (!inviteEmail.trim() || !workspaceId) return;
+    const found = members?.find(
+      (m) => m.user.email.toLowerCase() === inviteEmail.trim().toLowerCase()
+    );
+    if (found) {
+      setNewTaskAssigneeId(found.user.id);
+      toast.success(`${found.user.name} set as assignee`);
+    } else {
+      try {
+        const result = await findOrInvite.mutateAsync({ workspaceId, email: inviteEmail.trim() });
+        if (result.emailSent) {
+          toast.success(`Invite email sent to ${inviteEmail}. They can be assigned once they join.`);
+        } else if (result.userId) {
+          setNewTaskAssigneeId(result.userId);
+          toast.success("User added to workspace and set as assignee");
+          utils.workspaces.getMembers.invalidate();
+        }
+      } catch (err: any) {
+        toast.error(err.message || "Failed to invite user");
+      }
+    }
+    setInviteEmail("");
+    setShowInviteEmail(false);
   };
 
   const handleToggleComplete = (
@@ -228,6 +389,7 @@ export function ProjectListView({
         <div className="w-6" />
         <div className="flex-1">Task name</div>
         <div className="w-32 text-center">Assignee</div>
+        <div className="w-24 text-center">Priority</div>
         <div className="w-32 text-center">Due date</div>
         <div className="w-24 text-center">Status</div>
       </div>
@@ -237,7 +399,7 @@ export function ProjectListView({
           {/* Section Header */}
           <button
             onClick={() => toggleSection(section.id)}
-            className="group flex w-full items-center gap-2 py-2 text-sm font-semibold text-[#1e1f21]"
+            className="group flex w-full items-center gap-2 py-2 text-sm font-semibold text-[#1e1f21] dark:text-foreground"
           >
             <ChevronRight
               className={cn(
@@ -289,34 +451,91 @@ export function ProjectListView({
                       <Circle className="h-4 w-4 text-[#cfcbcb] hover:text-green-600" />
                     )}
                   </button>
-                  <button
-                    onClick={() => onTaskClick(task.id)}
-                    className={cn(
-                      "flex-1 text-left text-sm",
-                      task.status === "COMPLETE" &&
-                        "text-muted-foreground line-through"
-                    )}
-                  >
-                    {task.title}
-                  </button>
+                  {renamingTaskId === task.id ? (
+                    <Input
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && renameValue.trim()) {
+                          updateTask.mutate({ id: task.id, title: renameValue.trim() });
+                          setRenamingTaskId(null);
+                        }
+                        if (e.key === "Escape") setRenamingTaskId(null);
+                      }}
+                      onBlur={() => {
+                        if (renameValue.trim() && renameValue !== task.title) {
+                          updateTask.mutate({ id: task.id, title: renameValue.trim() });
+                        }
+                        setRenamingTaskId(null);
+                      }}
+                      className="h-7 flex-1 text-sm"
+                      autoFocus
+                    />
+                  ) : (
+                    <button
+                      onClick={() => onTaskClick(task.id)}
+                      className={cn(
+                        "flex-1 text-left text-sm flex items-center gap-1.5",
+                        task.status === "COMPLETE" &&
+                          "text-muted-foreground line-through"
+                      )}
+                    >
+                      {(task as any).isMilestone && <Diamond className="h-3.5 w-3.5 text-amber-500 shrink-0" />}
+                      {task.title}
+                      {(task as any).isApproval && (
+                        <span className={cn(
+                          "ml-1 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium",
+                          (task as any).approvalStatus === "APPROVED" ? "bg-green-100 text-green-700" :
+                          (task as any).approvalStatus === "REJECTED" ? "bg-red-100 text-red-700" :
+                          (task as any).approvalStatus === "CHANGES_REQUESTED" ? "bg-orange-100 text-orange-700" :
+                          "bg-yellow-100 text-yellow-700"
+                        )}>
+                          <ShieldCheck className="h-2.5 w-2.5" />
+                          {(task as any).approvalStatus ? (task as any).approvalStatus.replace("_", " ") : "PENDING"}
+                        </span>
+                      )}
+                    </button>
+                  )}
                   <div className="flex w-32 items-center justify-center">
-                    {task.assignee && (
-                      <Avatar className="h-6 w-6">
+                    {task.assignee ? (
+                      <Avatar className="h-6 w-6" title={task.assignee.name ?? ""}>
                         <AvatarFallback className="bg-[#4573D2] text-[10px] text-white">
                           {task.assignee.name
                             ?.split(" ")
                             .map((n) => n[0])
-                            .join("")}
+                            .join("")
+                            .toUpperCase()
+                            .slice(0, 2)}
                         </AvatarFallback>
                       </Avatar>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/50">—</span>
+                    )}
+                  </div>
+                  <div className="flex w-24 items-center justify-center">
+                    {task.priority ? (
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                          task.priority === "HIGH" && "bg-red-100 text-red-700",
+                          task.priority === "MEDIUM" && "bg-yellow-100 text-yellow-700",
+                          task.priority === "LOW" && "bg-blue-100 text-blue-700"
+                        )}
+                      >
+                        {task.priority === "HIGH" ? "High" : task.priority === "MEDIUM" ? "Medium" : "Low"}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/50">—</span>
                     )}
                   </div>
                   <div className="flex w-32 items-center justify-center text-xs text-muted-foreground">
-                    {task.dueDate && (
+                    {task.dueDate ? (
                       <span className="flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
                         {formatDate(task.dueDate)}
                       </span>
+                    ) : (
+                      <span className="text-muted-foreground/50">—</span>
                     )}
                   </div>
                   <div className="flex w-24 items-center justify-center">
@@ -336,36 +555,202 @@ export function ProjectListView({
 
               {/* Add Task */}
               {addingTaskInSection === section.id ? (
-                <div className="flex items-center border-b border-gray-100 py-1.5">
-                  <div className="w-6" />
-                  <div className="w-8" />
-                  <Circle className="mr-2 h-4 w-4 text-[#cfcbcb]" />
-                  <Input
-                    value={newTaskTitle}
-                    onChange={(e) => setNewTaskTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleAddTask(section.id);
-                      if (e.key === "Escape") {
+                <div className="border-b border-gray-100 py-2.5 px-2">
+                  {/* Row 1: Task name */}
+                  <div className="flex items-center gap-2">
+                    <Circle className="h-4 w-4 text-[#cfcbcb] shrink-0" />
+                    <Input
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && newTaskTitle.trim()) handleAddTask(section.id);
+                        if (e.key === "Escape") {
+                          setAddingTaskInSection(null);
+                          setNewTaskTitle("");
+                          setNewTaskPriority("");
+                          setNewTaskStatus("");
+                          setNewTaskAssigneeId("");
+                          setNewTaskDueDate("");
+                          setShowInviteEmail(false);
+                          setInviteEmail("");
+                        }
+                      }}
+                      placeholder="Task name"
+                      className="h-8 flex-1 text-sm"
+                      autoFocus
+                    />
+                  </div>
+
+                  {/* Row 2: Fields */}
+                  <div className="mt-2.5 ml-6 grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-4">
+                    {/* Assignee */}
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium text-muted-foreground">
+                        <User className="mr-0.5 inline h-3 w-3" /> Assignee
+                      </label>
+                      <Select value={newTaskAssigneeId} onValueChange={setNewTaskAssigneeId}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Select assignee" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {members?.map((m) => (
+                            <SelectItem key={m.user.id} value={m.user.id}>
+                              <div className="flex items-center gap-1.5">
+                                <Avatar className="h-4 w-4">
+                                  <AvatarFallback className="bg-[#4573D2] text-[7px] text-white">
+                                    {m.user.name?.split(" ").map((n) => n[0]).join("")}
+                                  </AvatarFallback>
+                                </Avatar>
+                                {m.user.name}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {!showInviteEmail ? (
+                        <button
+                          className="mt-1 text-[10px] text-[#4573D2] hover:underline"
+                          onClick={() => setShowInviteEmail(true)}
+                        >
+                          + Invite via email
+                        </button>
+                      ) : (
+                        <div className="mt-1 flex items-center gap-1">
+                          <Input
+                            value={inviteEmail}
+                            onChange={(e) => setInviteEmail(e.target.value)}
+                            placeholder="name@email.com"
+                            className="h-6 text-[10px]"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleInviteByEmail();
+                              }
+                            }}
+                          />
+                          <Button
+                            size="sm"
+                            className="h-6 px-2 text-[10px] bg-[#4573D2] hover:bg-[#3A63B8]"
+                            onClick={handleInviteByEmail}
+                            disabled={!inviteEmail.trim()}
+                          >
+                            Invite
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Priority */}
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium text-muted-foreground">Priority</label>
+                      <Select value={newTaskPriority} onValueChange={setNewTaskPriority}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Select priority" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="LOW">
+                            <span className="flex items-center gap-1.5">
+                              <span className="h-2 w-2 rounded-full bg-blue-400" /> Low
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="MEDIUM">
+                            <span className="flex items-center gap-1.5">
+                              <span className="h-2 w-2 rounded-full bg-yellow-400" /> Medium
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="HIGH">
+                            <span className="flex items-center gap-1.5">
+                              <span className="h-2 w-2 rounded-full bg-red-400" /> High
+                            </span>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Status */}
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium text-muted-foreground">Status</label>
+                      <Select value={newTaskStatus} onValueChange={setNewTaskStatus}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ON_TRACK">
+                            <span className="flex items-center gap-1.5">
+                              <span className="h-2 w-2 rounded-full bg-green-500" /> On Track
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="AT_RISK">
+                            <span className="flex items-center gap-1.5">
+                              <span className="h-2 w-2 rounded-full bg-yellow-500" /> At Risk
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="OFF_TRACK">
+                            <span className="flex items-center gap-1.5">
+                              <span className="h-2 w-2 rounded-full bg-red-500" /> Off Track
+                            </span>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Due Date */}
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium text-muted-foreground">
+                        <CalendarDays className="mr-0.5 inline h-3 w-3" /> Due date
+                      </label>
+                      <input
+                        type="date"
+                        value={newTaskDueDate}
+                        onChange={(e) => setNewTaskDueDate(e.target.value)}
+                        className="flex h-8 w-full rounded-md border border-input bg-transparent px-2 py-1 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 3: Actions */}
+                  <div className="mt-3 ml-6 flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      className="h-7 gap-1.5 bg-[#4573D2] hover:bg-[#3A63B8] text-xs"
+                      disabled={!newTaskTitle.trim() || createTask.isPending}
+                      onClick={() => handleAddTask(section.id)}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      {createTask.isPending ? "Creating..." : "Create task"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
                         setAddingTaskInSection(null);
                         setNewTaskTitle("");
-                      }
-                    }}
-                    onBlur={() => {
-                      if (newTaskTitle.trim()) handleAddTask(section.id);
-                      else {
-                        setAddingTaskInSection(null);
-                        setNewTaskTitle("");
-                      }
-                    }}
-                    placeholder="Write a task name, press Enter to save"
-                    className="h-7 flex-1 border-none bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
-                    autoFocus
-                  />
+                        setNewTaskPriority("");
+                        setNewTaskStatus("");
+                        setNewTaskAssigneeId("");
+                        setNewTaskDueDate("");
+                        setShowInviteEmail(false);
+                        setInviteEmail("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <button
-                  onClick={() => setAddingTaskInSection(section.id)}
-                  className="flex w-full items-center gap-2 py-2 text-sm text-muted-foreground hover:text-[#1e1f21]"
+                  onClick={() => {
+                    setAddingTaskInSection(section.id);
+                    setNewTaskTitle("");
+                    setNewTaskPriority("");
+                    setNewTaskStatus("");
+                    setNewTaskAssigneeId("");
+                    setNewTaskDueDate("");
+                    setShowInviteEmail(false);
+                    setInviteEmail("");
+                  }}
+                  className="flex w-full items-center gap-2 py-2 text-sm text-muted-foreground hover:text-[#4573D2]"
                 >
                   <div className="w-6" />
                   <div className="w-8" />
@@ -383,11 +768,19 @@ export function ProjectListView({
         sections={sections?.map((s) => ({ id: s.id, name: s.name }))}
       />
 
+      <FollowUpTaskDialog
+        open={followUpOpen}
+        onOpenChange={setFollowUpOpen}
+        originalTaskId={followUpTaskId}
+        originalTaskTitle={followUpTaskTitle}
+        projectId={projectId}
+      />
+
       {/* Right-click Context Menu */}
       {contextMenu && (
         <div
           ref={contextRef}
-          className="fixed z-50 min-w-[180px] rounded-md border bg-white py-1 shadow-lg"
+          className="fixed z-50 min-w-[180px] rounded-md border bg-white py-1 shadow-lg dark:bg-card"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
@@ -395,6 +788,22 @@ export function ProjectListView({
             onClick={() => { onTaskClick(contextMenu.taskId); setContextMenu(null); }}
           >
             <ExternalLink className="h-3.5 w-3.5" /> Open task
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const task = tasks?.find(t => t.id === contextMenu.taskId);
+              setRenameValue(task?.title ?? "");
+              setContextMenu(null);
+              // Delay setting renamingTaskId so the Input renders after context menu cleanup
+              setTimeout(() => {
+                setRenamingTaskId(contextMenu.taskId);
+              }, 50);
+            }}
+          >
+            <Pencil className="h-3.5 w-3.5" /> Rename
           </button>
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
@@ -415,11 +824,61 @@ export function ProjectListView({
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
-              markAsApproval.mutate({ id: contextMenu.taskId, isApproval: true });
+              const task = tasks?.find(t => t.id === contextMenu.taskId);
+              markAsApproval.mutate({ id: contextMenu.taskId, isApproval: !(task as any)?.isApproval });
               setContextMenu(null);
             }}
           >
-            <ShieldCheck className="h-3.5 w-3.5" /> Mark as approval
+            <ShieldCheck className="h-3.5 w-3.5" /> {(tasks?.find(t => t.id === contextMenu.taskId) as any)?.isApproval ? "Remove approval" : "Mark as approval"}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              const task = tasks?.find(t => t.id === contextMenu.taskId);
+              toggleMilestone.mutate({ id: contextMenu.taskId, isMilestone: !(task as any)?.isMilestone });
+              setContextMenu(null);
+            }}
+          >
+            <Diamond className="h-3.5 w-3.5" /> {(tasks?.find(t => t.id === contextMenu.taskId) as any)?.isMilestone ? "Remove milestone" : "Mark as milestone"}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              const task = tasks?.find(t => t.id === contextMenu.taskId);
+              setFollowUpTaskId(contextMenu.taskId);
+              setFollowUpTaskTitle(task?.title ?? "");
+              setFollowUpOpen(true);
+              setContextMenu(null);
+            }}
+          >
+            <GitBranch className="h-3.5 w-3.5" /> Create follow up task
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              setAddToProjectTaskId(contextMenu.taskId);
+              setContextMenu(null);
+            }}
+          >
+            <FolderPlus className="h-3.5 w-3.5" /> Add to another project
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              setSubtaskParentId(contextMenu.taskId);
+              setContextMenu(null);
+            }}
+          >
+            <ListTree className="h-3.5 w-3.5" /> Add subtask
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
+            onClick={() => {
+              toast.success("Task saved as template");
+              setContextMenu(null);
+            }}
+          >
+            <FileText className="h-3.5 w-3.5" /> Save as task template
           </button>
           <div className="my-1 border-t" />
           <div className="px-3 py-1 text-xs font-medium text-muted-foreground">Set due date</div>
@@ -477,6 +936,74 @@ export function ProjectListView({
           >
             <Trash2 className="h-3.5 w-3.5" /> Delete
           </button>
+        </div>
+      )}
+
+      {/* Add to another project popover */}
+      {addToProjectTaskId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={() => setAddToProjectTaskId(null)}>
+          <div className="rounded-lg border bg-white p-4 shadow-lg dark:bg-card min-w-[280px]" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-medium mb-3">Add to project</h3>
+            <div className="space-y-1 max-h-[200px] overflow-y-auto">
+              {allProjects?.filter(p => p.id !== projectId).map(p => (
+                <button
+                  key={p.id}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
+                  onClick={() => addToProject.mutate({ taskId: addToProjectTaskId, projectId: p.id })}
+                >
+                  <FolderPlus className="h-3.5 w-3.5 text-muted-foreground" />
+                  {p.name}
+                </button>
+              ))}
+              {(!allProjects || allProjects.filter(p => p.id !== projectId).length === 0) && (
+                <p className="text-xs text-muted-foreground px-2 py-1">No other projects available</p>
+              )}
+            </div>
+            <button className="mt-3 text-xs text-muted-foreground hover:text-foreground" onClick={() => setAddToProjectTaskId(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Add subtask dialog */}
+      {subtaskParentId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={() => { setSubtaskParentId(null); setSubtaskTitle(""); }}>
+          <div className="rounded-lg border bg-white p-4 shadow-lg dark:bg-card min-w-[320px]" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-medium mb-3">Add subtask</h3>
+            <Input
+              value={subtaskTitle}
+              onChange={(e) => setSubtaskTitle(e.target.value)}
+              placeholder="Subtask name..."
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && subtaskTitle.trim()) {
+                  createSubtask.mutate({
+                    title: subtaskTitle.trim(),
+                    parentTaskId: subtaskParentId,
+                    projectId,
+                  });
+                }
+              }}
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <Button variant="ghost" size="sm" onClick={() => { setSubtaskParentId(null); setSubtaskTitle(""); }}>Cancel</Button>
+              <Button
+                size="sm"
+                className="bg-[#4573D2] hover:bg-[#3A63B8]"
+                disabled={!subtaskTitle.trim() || createSubtask.isPending}
+                onClick={() => {
+                  if (subtaskTitle.trim()) {
+                    createSubtask.mutate({
+                      title: subtaskTitle.trim(),
+                      parentTaskId: subtaskParentId,
+                      projectId,
+                    });
+                  }
+                }}
+              >
+                {createSubtask.isPending ? "Adding..." : "Add subtask"}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

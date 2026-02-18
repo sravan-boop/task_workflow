@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,17 @@ import { trpc } from "@/lib/trpc";
 const googleEnabled = process.env.NEXT_PUBLIC_GOOGLE_ENABLED === "true";
 
 export default function RegisterPage() {
+  return (
+    <Suspense>
+      <RegisterForm />
+    </Suspense>
+  );
+}
+
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get("callbackUrl") || "/home";
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -27,7 +37,7 @@ export default function RegisterPage() {
         redirect: false,
       });
       if (result?.ok) {
-        router.push("/home");
+        router.push(callbackUrl);
         router.refresh();
       }
     },
@@ -43,7 +53,7 @@ export default function RegisterPage() {
   };
 
   const handleGoogleSignIn = () => {
-    signIn("google", { callbackUrl: "/home" });
+    signIn("google", { callbackUrl });
   };
 
   return (

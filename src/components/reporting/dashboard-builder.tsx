@@ -73,12 +73,19 @@ export function DashboardBuilder({ projectId }: DashboardBuilderProps) {
 
   const dashboardConfig = dashboardConfigs?.[0];
 
+  const utils = trpc.useUtils();
   const createDashboard = trpc.dashboards.create.useMutation({
-    onSuccess: () => toast.success("Dashboard saved"),
+    onSuccess: () => {
+      utils.dashboards.list.invalidate({ projectId });
+      toast.success("Dashboard saved");
+    },
   });
 
   const updateDashboard = trpc.dashboards.update.useMutation({
-    onSuccess: () => toast.success("Dashboard saved"),
+    onSuccess: () => {
+      utils.dashboards.list.invalidate({ projectId });
+      toast.success("Dashboard saved");
+    },
   });
 
   const [widgets, setWidgets] = useState<DashboardWidget[]>(

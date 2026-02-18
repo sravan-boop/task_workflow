@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
+import { realtime, REALTIME_EVENTS } from "../../services/realtime";
 
 export const goalsRouter = router({
   list: protectedProcedure
@@ -11,18 +12,37 @@ export const goalsRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id;
+
+      // Get team IDs the user belongs to
+      const userTeams = await ctx.prisma.teamMember.findMany({
+        where: { userId },
+        select: { teamId: true },
+      });
+      const userTeamIds = userTeams.map((t) => t.teamId);
+
       return ctx.prisma.goal.findMany({
         where: {
           workspaceId: input.workspaceId,
           parentGoalId: null,
           ...(input.teamId && { teamId: input.teamId }),
           ...(input.status && { status: input.status }),
+          // User can see goals they own, PUBLIC goals, or TEAM_ONLY goals for their teams
+          OR: [
+            { ownerId: userId },
+            { privacy: "PUBLIC" },
+            ...(userTeamIds.length > 0
+              ? [{ privacy: "TEAM_ONLY" as const, teamId: { in: userTeamIds } }]
+              : []),
+          ],
         },
         include: {
           team: true,
+          owner: { select: { id: true, name: true, email: true } },
           childGoals: {
             include: {
               team: true,
+              owner: { select: { id: true, name: true, email: true } },
               _count: { select: { childGoals: true } },
             },
           },
@@ -38,10 +58,12 @@ export const goalsRouter = router({
         where: { id: input.id },
         include: {
           team: true,
+          owner: { select: { id: true, name: true, email: true } },
           parentGoal: true,
           childGoals: {
             include: {
               team: true,
+              owner: { select: { id: true, name: true, email: true } },
               childGoals: true,
             },
           },
@@ -59,21 +81,24 @@ export const goalsRouter = router({
         parentGoalId: z.string().optional(),
         targetValue: z.number().default(100),
         unit: z.string().default("percent"),
+        privacy: z.enum(["PUBLIC", "PRIVATE", "TEAM_ONLY"]).default("PUBLIC"),
         timePeriodStart: z.string().datetime().optional(),
         timePeriodEnd: z.string().datetime().optional(),
+        ownerId: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.goal.create({
+      const goal = await ctx.prisma.goal.create({
         data: {
           name: input.name,
           description: input.description,
           workspaceId: input.workspaceId,
           teamId: input.teamId,
-          ownerId: ctx.session.user.id,
+          ownerId: input.ownerId || ctx.session.user.id,
           parentGoalId: input.parentGoalId,
           targetValue: input.targetValue,
           unit: input.unit,
+          privacy: input.privacy,
           timePeriodStart: input.timePeriodStart
             ? new Date(input.timePeriodStart)
             : undefined,
@@ -82,6 +107,8 @@ export const goalsRouter = router({
             : undefined,
         },
       });
+      realtime.publish({ type: REALTIME_EVENTS.GOAL_CREATED, workspaceId: input.workspaceId, data: { goalId: goal.id } });
+      return goal;
     }),
 
   update: protectedProcedure
@@ -95,11 +122,13 @@ export const goalsRouter = router({
         targetValue: z.number().optional(),
         timePeriodStart: z.string().datetime().optional(),
         timePeriodEnd: z.string().datetime().optional(),
+        ownerId: z.string().optional(),
+        teamId: z.string().nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const { id, timePeriodStart, timePeriodEnd, ...data } = input;
-      return ctx.prisma.goal.update({
+      const goal = await ctx.prisma.goal.update({
         where: { id },
         data: {
           ...data,
@@ -111,13 +140,20 @@ export const goalsRouter = router({
           }),
         },
       });
+      realtime.publish({ type: REALTIME_EVENTS.GOAL_UPDATED, workspaceId: goal.workspaceId, data: { goalId: goal.id } });
+      return goal;
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.goal.delete({
+      const goal = await ctx.prisma.goal.findUnique({ where: { id: input.id }, select: { workspaceId: true } });
+      const result = await ctx.prisma.goal.delete({
         where: { id: input.id },
       });
+      if (goal) {
+        realtime.publish({ type: REALTIME_EVENTS.GOAL_DELETED, workspaceId: goal.workspaceId, data: { goalId: input.id } });
+      }
+      return result;
     }),
 });

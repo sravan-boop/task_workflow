@@ -29,6 +29,7 @@ model User {
   twoFactorEnabled        Boolean  @default(false)
   twoFactorSecret         String?
   backupCodes             Json?
+  privateNotepad          String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -48,6 +49,9 @@ model User {
   visitHistory         VisitHistory[]
   userCapacity         UserCapacity[]
   annotations          Annotation[]
+  ownedGoals           Goal[]             @relation("GoalOwner")
+  createdProjects      Project[]          @relation("ProjectCreator")
+  portfolioMemberships PortfolioMember[]
 }
 
 model Account {
@@ -90,12 +94,14 @@ model VerificationToken {
 // ============================================================
 
 model Workspace {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  logoUrl     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String         @id @default(cuid())
+  name         String
+  description  String?
+  logoUrl      String?
+  inviteToken  String?        @unique
+  inviteRole   WorkspaceRole  @default(MEMBER)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   members                WorkspaceMember[]
   teams                  Team[]
@@ -187,6 +193,7 @@ model Project {
 
   workspace      Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   team           Team?                @relation(fields: [teamId], references: [id])
+  createdBy      User                 @relation("ProjectCreator", fields: [createdById], references: [id])
   sections       Section[]
   taskProjects   TaskProject[]
   customFields   ProjectCustomField[]
@@ -264,6 +271,7 @@ model Task {
   isMilestone    Boolean        @default(false)
   isApproval     Boolean        @default(false)
   approvalStatus ApprovalStatus?
+  priority       String?
   estimatedHours Float?
   storyPoints    Float?
   workspaceId    String
@@ -558,6 +566,7 @@ enum NotificationType {
   FOLLOWER_ADDED
   DUE_DATE_APPROACHING
   TASK_OVERDUE
+  PORTFOLIO_SHARED
 }
 
 // ============================================================
@@ -586,6 +595,7 @@ enum ProjectStatusType {
   OFF_TRACK
   ON_HOLD
   COMPLETE
+  DROPPED
 }
 
 // ============================================================
@@ -596,6 +606,8 @@ model Portfolio {
   id                String   @id @default(cuid())
   name              String
   description       String?
+  privacy           String   @default("PUBLIC")
+  defaultView       String   @default("LIST")
   workspaceId       String
   ownerId           String
   parentPortfolioId String?
@@ -605,8 +617,24 @@ model Portfolio {
   parentPortfolio Portfolio?         @relation("NestedPortfolios", fields: [parentPortfolioId], references: [id])
   childPortfolios Portfolio[]        @relation("NestedPortfolios")
   projects        PortfolioProject[]
+  members         PortfolioMember[]
+  goals           PortfolioGoal[]
 
   @@index([workspaceId])
+}
+
+model PortfolioMember {
+  id          String              @id @default(cuid())
+  portfolioId String
+  userId      String
+  permission  ProjectPermission   @default(EDITOR)
+  createdAt   DateTime            @default(now())
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, userId])
+  @@index([portfolioId])
 }
 
 model PortfolioProject {
@@ -618,6 +646,19 @@ model PortfolioProject {
   project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([portfolioId, projectId])
+}
+
+model PortfolioGoal {
+  id          String @id @default(cuid())
+  portfolioId String
+  goalId      String
+  createdAt   DateTime @default(now())
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  goal      Goal      @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, goalId])
+  @@index([portfolioId])
 }
 
 // ============================================================
@@ -641,12 +682,22 @@ model Goal {
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
+  privacy         GoalPrivacy @default(PUBLIC)
+
   workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   team       Team?     @relation(fields: [teamId], references: [id])
+  owner      User      @relation("GoalOwner", fields: [ownerId], references: [id])
   parentGoal Goal?     @relation("GoalHierarchy", fields: [parentGoalId], references: [id])
   childGoals Goal[]    @relation("GoalHierarchy")
+  portfolios PortfolioGoal[]
 
   @@index([workspaceId])
+}
+
+enum GoalPrivacy {
+  PUBLIC
+  PRIVATE
+  TEAM_ONLY
 }
 
 enum GoalStatus {

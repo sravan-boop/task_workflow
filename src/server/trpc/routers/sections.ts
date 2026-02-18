@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
+import { realtime, REALTIME_EVENTS } from "../../services/realtime";
 
 export const sectionsRouter = router({
   list: protectedProcedure
@@ -27,13 +28,18 @@ export const sectionsRouter = router({
 
       const position = (lastSection?.position ?? 0) + 1;
 
-      return ctx.prisma.section.create({
+      const section = await ctx.prisma.section.create({
         data: {
           name: input.name,
           projectId: input.projectId,
           position,
         },
       });
+      const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId }, select: { workspaceId: true } });
+      if (project) {
+        realtime.publish({ type: REALTIME_EVENTS.SECTION_UPDATED, workspaceId: project.workspaceId, data: { projectId: input.projectId } });
+      }
+      return section;
     }),
 
   update: protectedProcedure
@@ -44,18 +50,31 @@ export const sectionsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.section.update({
+      const section = await ctx.prisma.section.update({
         where: { id: input.id },
         data: { name: input.name },
       });
+      const project = await ctx.prisma.project.findUnique({ where: { id: section.projectId }, select: { workspaceId: true } });
+      if (project) {
+        realtime.publish({ type: REALTIME_EVENTS.SECTION_UPDATED, workspaceId: project.workspaceId, data: { projectId: section.projectId } });
+      }
+      return section;
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.section.delete({
+      const section = await ctx.prisma.section.findUnique({ where: { id: input.id }, select: { projectId: true } });
+      const result = await ctx.prisma.section.delete({
         where: { id: input.id },
       });
+      if (section) {
+        const project = await ctx.prisma.project.findUnique({ where: { id: section.projectId }, select: { workspaceId: true } });
+        if (project) {
+          realtime.publish({ type: REALTIME_EVENTS.SECTION_UPDATED, workspaceId: project.workspaceId, data: { projectId: section.projectId } });
+        }
+      }
+      return result;
     }),
 
   reorder: protectedProcedure
@@ -74,6 +93,10 @@ export const sectionsRouter = router({
       );
 
       await ctx.prisma.$transaction(updates);
+      const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId }, select: { workspaceId: true } });
+      if (project) {
+        realtime.publish({ type: REALTIME_EVENTS.SECTION_UPDATED, workspaceId: project.workspaceId, data: { projectId: input.projectId } });
+      }
       return { success: true };
     }),
 });
