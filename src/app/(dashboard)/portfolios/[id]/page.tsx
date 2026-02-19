@@ -792,6 +792,67 @@ export default function PortfolioDetailPage() {
                 </Button>
               </div>
             )}
+
+            {/* Connected Goals Section */}
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-[#6d6e6f] dark:text-muted-foreground">Connected goals</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  onClick={() => setAddGoalOpen(true)}
+                >
+                  <Target className="h-3 w-3" />
+                  Add goal
+                </Button>
+              </div>
+              {connectedGoals.length > 0 ? (
+                <div className="rounded-lg border">
+                  {connectedGoals.map((goal) => (
+                    <div
+                      key={goal.id}
+                      className="group flex items-center gap-3 border-b px-5 py-3 last:border-b-0 hover:bg-muted/30"
+                    >
+                      <Target className="h-3.5 w-3.5 text-[#4573D2]" />
+                      <Link
+                        href={`/goals/${goal.id}`}
+                        className="flex-1 text-sm font-medium text-foreground hover:text-[#4573D2]"
+                      >
+                        {goal.name}
+                      </Link>
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
+                        style={{ backgroundColor: STATUS_COLORS[goal.status] || "#6D6E6F" }}
+                      >
+                        {STATUS_LABELS[goal.status] || goal.status}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleRemoveGoal(goal.id)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center rounded-lg border py-8 text-center">
+                  <Target className="mb-2 h-8 w-8 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">No goals connected yet</p>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="mt-1 text-xs text-[#4573D2]"
+                    onClick={() => setAddGoalOpen(true)}
+                  >
+                    Connect a goal
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

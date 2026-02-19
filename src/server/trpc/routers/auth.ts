@@ -1,8 +1,11 @@
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { Resend } from "resend";
 import { router, publicProcedure, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 export const authRouter = router({
   register: publicProcedure
@@ -100,14 +103,25 @@ export const authRouter = router({
         },
       });
 
-      // In production, send email via Resend/SendGrid
-      // For now, log the reset link (development mode)
-      console.log(
-        `[Password Reset] Token for ${input.email}: ${token}`
-      );
-      console.log(
-        `[Password Reset] Link: ${process.env.NEXTAUTH_URL}/reset-password?token=${token}&email=${encodeURIComponent(input.email)}`
-      );
+      const resetLink = `${process.env.AUTH_URL || process.env.NEXTAUTH_URL || "http://localhost:3000"}/reset-password?token=${token}&email=${encodeURIComponent(input.email)}`;
+
+      if (resend) {
+        await resend.emails.send({
+          from: "TaskFlow <onboarding@resend.dev>",
+          to: input.email,
+          subject: "Reset your TaskFlow password",
+          html: `
+            <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+              <h2 style="color: #1e1f21;">Reset your password</h2>
+              <p style="color: #6d6e6f;">Click the link below to reset your password. This link expires in 1 hour.</p>
+              <a href="${resetLink}" style="display: inline-block; background: #4573D2; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin: 16px 0;">Reset Password</a>
+              <p style="color: #6d6e6f; font-size: 13px;">If you didn't request this, you can safely ignore this email.</p>
+            </div>
+          `,
+        });
+      } else {
+        console.log(`[Password Reset] Link: ${resetLink}`);
+      }
 
       return { success: true };
     }),
@@ -262,13 +276,24 @@ export const authRouter = router({
       },
     });
 
-    // In production, send email
-    console.log(
-      `[Email Verification] Token for ${user.email}: ${token}`
-    );
-    console.log(
-      `[Email Verification] Link: ${process.env.NEXTAUTH_URL}/verify-email?token=${token}&email=${encodeURIComponent(user.email)}`
-    );
+    const verifyLink = `${process.env.AUTH_URL || process.env.NEXTAUTH_URL || "http://localhost:3000"}/verify-email?token=${token}&email=${encodeURIComponent(user.email)}`;
+
+    if (resend) {
+      await resend.emails.send({
+        from: "TaskFlow <onboarding@resend.dev>",
+        to: user.email,
+        subject: "Verify your TaskFlow email",
+        html: `
+          <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+            <h2 style="color: #1e1f21;">Verify your email</h2>
+            <p style="color: #6d6e6f;">Click the link below to verify your email address.</p>
+            <a href="${verifyLink}" style="display: inline-block; background: #4573D2; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin: 16px 0;">Verify Email</a>
+          </div>
+        `,
+      });
+    } else {
+      console.log(`[Email Verification] Link: ${verifyLink}`);
+    }
 
     return { success: true, alreadyVerified: false };
   }),
