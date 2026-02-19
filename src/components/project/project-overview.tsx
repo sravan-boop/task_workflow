@@ -40,9 +40,10 @@ const STATUS_CONFIG: Record<
 
 interface ProjectOverviewProps {
   projectId: string;
+  onTaskClick?: (taskId: string) => void;
 }
 
-export function ProjectOverview({ projectId }: ProjectOverviewProps) {
+export function ProjectOverview({ projectId, onTaskClick }: ProjectOverviewProps) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   const now = useMemo(() => (mounted ? new Date() : null), [mounted]);
@@ -506,15 +507,17 @@ export function ProjectOverview({ projectId }: ProjectOverviewProps) {
                   return (
                     <div
                       key={ms.id}
-                      className="flex items-center gap-3 rounded-lg border px-4 py-3 hover:bg-muted/30 transition-colors"
+                      className="flex items-center gap-3 rounded-lg border px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                      onClick={() => onTaskClick?.(ms.id)}
                     >
                       <button
                         className="shrink-0"
-                        onClick={() =>
+                        onClick={(e) => {
+                          e.stopPropagation();
                           isComplete
                             ? uncompleteTask.mutate({ id: ms.id })
-                            : completeTask.mutate({ id: ms.id })
-                        }
+                            : completeTask.mutate({ id: ms.id });
+                        }}
                       >
                         {isComplete ? (
                           <CheckCircle2 className="h-4.5 w-4.5 text-green-600" />

@@ -93,6 +93,7 @@ export function PortfoliosContent() {
   const [sharePortfolioId, setSharePortfolioId] = useState<string | null>(null);
   const [descriptions, setDescriptions] = useState<Record<string, string>>({});
   const [projectStatuses, setProjectStatuses] = useState<Record<string, string>>({});
+  const [goalsPortfolioId, setGoalsPortfolioId] = useState<string | null>(null);
 
   const togglePortfolio = (id: string) => {
     setExpandedPortfolios((prev) => {
@@ -126,6 +127,35 @@ export function PortfoliosContent() {
     { workspaceId: workspaceId! },
     { enabled: !!workspaceId }
   );
+
+  const { data: workspaceGoals } = trpc.goals.list.useQuery(
+    { workspaceId: workspaceId! },
+    { enabled: !!workspaceId && !!goalsPortfolioId }
+  );
+
+  const { data: portfolioGoals } = trpc.portfolios.getGoals.useQuery(
+    { portfolioId: goalsPortfolioId! },
+    { enabled: !!goalsPortfolioId }
+  );
+
+  const connectGoal = trpc.portfolios.connectGoal.useMutation({
+    onSuccess: () => {
+      utils.portfolios.getGoals.invalidate({ portfolioId: goalsPortfolioId! });
+      toast.success("Goal connected to portfolio");
+    },
+    onError: (err) => toast.error(err.message || "Failed to connect goal"),
+  });
+
+  const disconnectGoal = trpc.portfolios.disconnectGoal.useMutation({
+    onSuccess: () => {
+      utils.portfolios.getGoals.invalidate({ portfolioId: goalsPortfolioId! });
+      toast.success("Goal removed from portfolio");
+    },
+    onError: (err) => toast.error(err.message || "Failed to disconnect goal"),
+  });
+
+  const connectedGoalIds = new Set(portfolioGoals?.map((pg) => pg.goalId) ?? []);
+  const availableGoals = workspaceGoals?.filter((g) => !connectedGoalIds.has(g.id)) ?? [];
 
   const addMember = trpc.portfolios.addMember.useMutation({
     onSuccess: () => {
@@ -412,7 +442,7 @@ export function PortfoliosContent() {
                               variant="ghost"
                               size="sm"
                               className="h-7 gap-1 text-xs text-[#4573D2] hover:text-[#3A63B8]"
-                              onClick={() => toast.info("Add goals coming soon")}
+                              onClick={() => setGoalsPortfolioId(portfolio.id)}
                             >
                               <Target className="h-3 w-3" />
                               Add goals
@@ -739,6 +769,116 @@ export function PortfoliosContent() {
                 size="sm"
                 onClick={() => setShareOpen(false)}
               >
+                Done
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Goals Dialog */}
+      <Dialog open={!!goalsPortfolioId} onOpenChange={(open) => { if (!open) setGoalsPortfolioId(null); }}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>
+              <div className="flex items-center gap-2">
+                <Target className="h-4 w-4 text-[#4573D2]" />
+                Connect Goals
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Already connected goals */}
+            {portfolioGoals && portfolioGoals.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Connected goals
+                </Label>
+                <div className="rounded-lg border divide-y max-h-[200px] overflow-y-auto">
+                  {portfolioGoals.map((pg) => (
+                    <div key={pg.goalId} className="flex items-center gap-3 p-3">
+                      <Target className="h-4 w-4 text-green-600 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{pg.goal.name}</p>
+                        {pg.goal.team && (
+                          <p className="text-xs text-muted-foreground">{pg.goal.team.name}</p>
+                        )}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs text-red-500 hover:text-red-600 hover:bg-red-50 shrink-0"
+                        onClick={() => {
+                          if (goalsPortfolioId) {
+                            disconnectGoal.mutate({ portfolioId: goalsPortfolioId, goalId: pg.goalId });
+                          }
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Available goals to add */}
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                {portfolioGoals && portfolioGoals.length > 0 ? "Add more goals" : "Available goals"}
+              </Label>
+              {availableGoals.length > 0 ? (
+                <div className="rounded-lg border divide-y max-h-[250px] overflow-y-auto">
+                  {availableGoals.map((goal) => (
+                    <div
+                      key={goal.id}
+                      className="flex items-center gap-3 p-3 hover:bg-muted/30 cursor-pointer transition-colors"
+                      onClick={() => {
+                        if (goalsPortfolioId) {
+                          connectGoal.mutate({ portfolioId: goalsPortfolioId, goalId: goal.id });
+                        }
+                      }}
+                    >
+                      <Target className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{goal.name}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {goal.team && (
+                            <span className="text-xs text-muted-foreground">{goal.team.name}</span>
+                          )}
+                          {goal.status && (
+                            <span
+                              className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium text-white"
+                              style={{ backgroundColor: STATUS_COLORS[goal.status] || "#6D6E6F" }}
+                            >
+                              {STATUS_LABELS[goal.status] || goal.status}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <Plus className="h-4 w-4 text-[#4573D2] shrink-0" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border p-6 text-center">
+                  <Target className="h-8 w-8 mx-auto text-muted-foreground/30 mb-2" />
+                  <p className="text-sm text-muted-foreground">
+                    {workspaceGoals?.length === 0
+                      ? "No goals in this workspace yet."
+                      : "All goals are already connected."}
+                  </p>
+                  {workspaceGoals?.length === 0 && (
+                    <Link href="/goals" className="text-xs text-[#4573D2] hover:underline mt-1 inline-block">
+                      Create a goal first
+                    </Link>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <Button variant="ghost" size="sm" onClick={() => setGoalsPortfolioId(null)}>
                 Done
               </Button>
             </div>

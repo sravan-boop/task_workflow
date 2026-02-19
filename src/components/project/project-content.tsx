@@ -180,7 +180,7 @@ export function ProjectContent({ projectId }: ProjectContentProps) {
               />
             )}
             {activeView === "overview" && (
-              <ProjectOverview projectId={projectId} />
+              <ProjectOverview projectId={projectId} onTaskClick={setSelectedTaskId} />
             )}
             {activeView === "files" && (
               <ProjectFilesView projectId={projectId} />
