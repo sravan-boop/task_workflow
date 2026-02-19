@@ -49,6 +49,52 @@ import {
   UserPlus,
 } from "lucide-react";
 
+// ── Per-portfolio goals section (fetches its own data) ──────────────────────
+function PortfolioGoalsSection({ portfolioId, onAddGoals }: { portfolioId: string; onAddGoals: () => void }) {
+  const { data: goals } = trpc.portfolios.getGoals.useQuery({ portfolioId });
+
+  return (
+    <div className="border-t px-5 py-4">
+      <div className="flex items-center justify-between">
+        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Connected goals
+        </label>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 text-xs text-[#4573D2] hover:text-[#3A63B8]"
+          onClick={onAddGoals}
+        >
+          <Target className="h-3 w-3" />
+          Add goals
+        </Button>
+      </div>
+      {goals && goals.length > 0 ? (
+        <div className="mt-2 space-y-1.5">
+          {goals.map((pg) => (
+            <div key={pg.goalId} className="flex items-center gap-2 rounded-md border px-3 py-2">
+              <Target className="h-3 w-3 text-[#4573D2] shrink-0" />
+              <Link href={`/goals/${pg.goal.id}`} className="flex-1 truncate text-xs font-medium text-foreground hover:text-[#4573D2]">
+                {pg.goal.name}
+              </Link>
+              <span
+                className="rounded-full px-1.5 py-0.5 text-[9px] font-medium text-white"
+                style={{ backgroundColor: STATUS_COLORS[pg.goal.status] || "#6D6E6F" }}
+              >
+                {STATUS_LABELS[pg.goal.status] || pg.goal.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-1 text-xs text-muted-foreground">
+          No goals connected yet. Link goals to track alignment.
+        </p>
+      )}
+    </div>
+  );
+}
+
 const STATUS_COLORS: Record<string, string> = {
   ON_TRACK: "#7BC86C",
   AT_RISK: "#FD9A00",
@@ -433,25 +479,10 @@ export function PortfoliosContent() {
                         </div>
 
                         {/* Connected Goals */}
-                        <div className="border-t px-5 py-4">
-                          <div className="flex items-center justify-between">
-                            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                              Connected goals
-                            </label>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 gap-1 text-xs text-[#4573D2] hover:text-[#3A63B8]"
-                              onClick={() => setGoalsPortfolioId(portfolio.id)}
-                            >
-                              <Target className="h-3 w-3" />
-                              Add goals
-                            </Button>
-                          </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            No goals connected yet. Link goals to track alignment.
-                          </p>
-                        </div>
+                        <PortfolioGoalsSection
+                          portfolioId={portfolio.id}
+                          onAddGoals={() => setGoalsPortfolioId(portfolio.id)}
+                        />
 
                         {/* Members */}
                         <div className="border-t px-5 py-4">
