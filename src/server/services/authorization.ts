@@ -16,6 +16,10 @@ export async function verifyProjectAccess(
       OR: [
         { createdById: userId },
         { members: { some: { userId } } },
+        {
+          privacy: "PUBLIC",
+          workspace: { members: { some: { userId } } }
+        },
       ],
     },
     select: { id: true },
@@ -49,6 +53,10 @@ export async function verifyTaskAccess(
                 OR: [
                   { createdById: userId },
                   { members: { some: { userId } } },
+                  {
+                    privacy: "PUBLIC",
+                    workspace: { members: { some: { userId } } }
+                  },
                 ],
               },
             },

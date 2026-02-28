@@ -26,22 +26,38 @@ import {
   FolderKanban,
   Trash2,
   Link2,
+  ArrowRightLeft,
+  Pencil,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useSession } from "next-auth/react";
 
 export default function TeamPage() {
   const params = useParams();
   const teamId = params.id as string;
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameName, setRenameName] = useState("");
 
   const { data: team, isLoading } = trpc.teams.get.useQuery({ id: teamId });
   const utils = trpc.useUtils();
+  const { data: session } = useSession();
+
+  const currentUserId = session?.user?.id;
+  const currentUserRole = team?.members.find((m) => m.user.id === currentUserId)?.role;
+  const isLead = currentUserRole === "LEAD";
+  const isWorkspaceOwner = team?.workspace?.members.find((m) => m.userId === currentUserId)?.role === "OWNER";
+  const canManageTeam = isLead || isWorkspaceOwner;
 
   const addMember = trpc.teams.addMember.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
       utils.teams.get.invalidate({ id: teamId });
-      toast.success("Member added to team");
+      if (data && "emailSent" in data && data.emailSent) {
+        toast.success(`Invite email sent to ${inviteEmail}`);
+      } else {
+        toast.success("Member added to team");
+      }
       setInviteEmail("");
       setInviteOpen(false);
     },
@@ -58,15 +74,46 @@ export default function TeamPage() {
     onError: () => toast.error("Failed to remove member"),
   });
 
+  const { data: inviteData } = trpc.teams.getInviteLink.useQuery(
+    { teamId },
+    { enabled: !!isLead }
+  );
+
+  const regenerateInvite = trpc.teams.regenerateInviteLink.useMutation({
+    onSuccess: () => {
+      utils.teams.getInviteLink.invalidate({ teamId });
+      toast.success("Invite link regenerated");
+    },
+    onError: () => toast.error("Failed to regenerate link"),
+  });
+
+  const makeLead = trpc.teams.makeLead.useMutation({
+    onSuccess: () => {
+      utils.teams.get.invalidate({ id: teamId });
+      toast.success("Team leadership transferred!");
+    },
+    onError: (err) => toast.error(err.message || "Failed to transfer leadership"),
+  });
+
+  const renameTeam = trpc.teams.update.useMutation({
+    onSuccess: () => {
+      utils.teams.get.invalidate({ id: teamId });
+      utils.teams.list.invalidate(); // To update sidebar
+      toast.success("Team renamed successfully!");
+      setRenameOpen(false);
+    },
+    onError: (err) => toast.error(err.message || "Failed to rename team"),
+  });
+
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteEmail.trim()) return;
     addMember.mutate({ teamId, email: inviteEmail.trim() });
   };
 
-  const inviteLink = typeof window !== "undefined"
-    ? `${window.location.origin}/register?team=${teamId}`
-    : "";
+  const inviteLink = inviteData?.token
+    ? `${typeof window !== "undefined" ? window.location.origin : ""}/join-team/${inviteData.token}`
+    : "Loading invite link...";
 
   const copyInviteLink = () => {
     if (navigator.clipboard && window.isSecureContext) {
@@ -126,7 +173,23 @@ export default function TeamPage() {
               <Users className="h-5 w-5 text-[#4573D2]" />
             </div>
             <div>
-              <h1 className="text-lg font-medium text-[#1e1f21]">{team.name}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-medium text-[#1e1f21]">{team.name}</h1>
+                {canManageTeam && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                    title="Rename Team"
+                    onClick={() => {
+                      setRenameName(team.name);
+                      setRenameOpen(true);
+                    }}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
               {team.description && (
                 <p className="text-xs text-muted-foreground">{team.description}</p>
               )}
@@ -184,20 +247,41 @@ export default function TeamPage() {
                           <Badge variant="outline" className="text-xs">
                             {member.role}
                           </Badge>
-                          {member.role !== "LEAD" && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                              onClick={() => {
-                                if (window.confirm(`Remove ${member.user.name} from this team?`)) {
-                                  removeMember.mutate({ teamId, userId: member.user.id });
-                                }
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
+                          <div className="flex items-center gap-1">
+                            {canManageTeam && member.role !== "LEAD" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs font-medium"
+                                title="Transfer Leadership"
+                                onClick={() => {
+                                  if (window.confirm(`Make ${member.user.name} the team lead? You will become a regular member.`)) {
+                                    makeLead.mutate({
+                                      teamId,
+                                      newLeadId: member.user.id
+                                    });
+                                  }
+                                }}
+                                disabled={makeLead.isPending}
+                              >
+                                Make Lead
+                              </Button>
+                            )}
+                            {member.role !== "LEAD" && canManageTeam && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                onClick={() => {
+                                  if (window.confirm(`Remove ${member.user.name} from this team?`)) {
+                                    removeMember.mutate({ teamId, userId: member.user.id });
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
@@ -208,30 +292,36 @@ export default function TeamPage() {
 
             {/* Invite & Info Card */}
             <div className="space-y-6">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Link2 className="h-4 w-4" />
-                    Invite Link
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="mb-3 text-xs text-muted-foreground">
-                    Share this link to invite people to register and join the team.
-                  </p>
-                  <div className="flex gap-2">
-                    <Input
-                      value={inviteLink}
-                      readOnly
-                      className="text-xs"
-                      onClick={(e) => (e.target as HTMLInputElement).select()}
-                    />
-                    <Button variant="outline" size="icon" onClick={copyInviteLink}>
-                      <Copy className="h-3.5 w-3.5" />
+              {canManageTeam && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Link2 className="h-4 w-4" />
+                      Invite Link
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      Share this link to invite people to register and join the team.
+                    </p>
+                    <div className="flex gap-2">
+                      <Input readOnly value={inviteLink} className="bg-gray-50 font-mono text-xs" onClick={(e) => (e.target as HTMLInputElement).select()} />
+                      <Button variant="outline" size="icon" onClick={copyInviteLink} disabled={!inviteData?.token}>
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="px-0 text-xs text-muted-foreground"
+                      onClick={() => regenerateInvite.mutate({ teamId })}
+                      disabled={regenerateInvite.isPending}
+                    >
+                      Generate new link
                     </Button>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
 
               <Card>
                 <CardHeader className="pb-3">
@@ -317,6 +407,47 @@ export default function TeamPage() {
                 className="bg-[#4573D2] hover:bg-[#3A63B8]"
               >
                 {addMember.isPending ? "Adding..." : "Add member"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename Team Dialog */}
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Rename Team</DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (renameName.trim() && renameName !== team.name) {
+                renameTeam.mutate({ id: teamId, name: renameName.trim() });
+              }
+            }}
+            className="space-y-4"
+          >
+            <div className="space-y-2">
+              <Label htmlFor="team-name">Team Name</Label>
+              <Input
+                id="team-name"
+                value={renameName}
+                onChange={(e) => setRenameName(e.target.value)}
+                placeholder="Enter new team name"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="ghost" onClick={() => setRenameOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={!renameName.trim() || renameName.trim() === team.name || renameTeam.isPending}
+                className="bg-[#4573D2] hover:bg-[#3A63B8]"
+              >
+                {renameTeam.isPending ? "Saving..." : "Save changes"}
               </Button>
             </div>
           </form>

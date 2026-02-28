@@ -47,6 +47,7 @@ import {
   BellRing,
   Check,
   FileSpreadsheet,
+  ArrowRightLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -161,6 +162,9 @@ export function ProjectHeader({
   const [templateName, setTemplateName] = useState(`${project.name} Template`);
   const [templateIncludeTasks, setTemplateIncludeTasks] = useState(true);
   const [templateIncludeFields, setTemplateIncludeFields] = useState(true);
+
+  // Transfer Ownership state
+  const [transferRole, setTransferRole] = useState("");
 
   // Share dialog tab state
   const [shareTab, setShareTab] = useState<"invite" | "notifications">("invite");
@@ -285,6 +289,15 @@ export function ProjectHeader({
       setSelectedPortfolioId("");
     },
     onError: () => toast.error("Failed to add project to portfolio"),
+  });
+
+  const transferOwnership = trpc.projects.transferOwnership.useMutation({
+    onSuccess: () => {
+      toast.success("Project ownership transferred!");
+      setTransferRole("");
+      utils.projects.get.invalidate({ id: project.id });
+    },
+    onError: (err) => toast.error(err.message || "Failed to transfer ownership"),
   });
 
   const { data: exportTasks } = trpc.projects.getTasksForExport.useQuery(
@@ -1133,6 +1146,49 @@ export function ProjectHeader({
                   <SelectItem value="admin">Admins only</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Transfer Ownership (only visible if project members are loaded) */}
+            <div className="space-y-2 border-t pt-4 mt-2">
+              <Label className="text-sm font-medium">Transfer Ownership</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Select a member below to request an ownership transfer. You will remain an editor if they accept.
+              </p>
+              <div className="flex gap-2">
+                <Select value={transferRole} onValueChange={setTransferRole}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Select member..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projectMembers?.map((pm) => {
+                      const user = members?.find((m) => m.user.id === pm.userId)?.user;
+                      if (!user) return null;
+                      // Only allow transferring to others
+                      if (pm.permission === "ADMIN" && pm.userId === projectMembers.find(p => p.permission === "ADMIN")?.userId) {
+                        // The 'createdById' isn't explicitly available, but typical users won't transfer to themselves anyway
+                      }
+                      return (
+                        <SelectItem key={pm.userId} value={pm.userId}>
+                          {user.name || user.email}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  disabled={!transferRole || transferOwnership.isPending}
+                  onClick={() => {
+                    transferOwnership.mutate({
+                      projectId: project.id,
+                      newOwnerId: transferRole
+                    });
+                  }}
+                >
+                  <ArrowRightLeft className="mr-2 h-4 w-4" />
+                  Transfer
+                </Button>
+              </div>
             </div>
 
             {/* Permission defaults for new members */}

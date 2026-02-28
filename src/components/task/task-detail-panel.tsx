@@ -20,6 +20,12 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
   X,
@@ -49,6 +55,7 @@ import {
   UserPlus,
   Diamond,
   MoreHorizontal,
+  ArrowRightLeft,
 } from "lucide-react";
 import { AiTaskSummary } from "@/components/ai/ai-task-summary";
 import { RichTextEditor } from "@/components/editor/rich-text-editor";
@@ -89,6 +96,9 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [viewingSubtaskId, setViewingSubtaskId] = useState<string | null>(null);
 
+  const [transferTaskOpen, setTransferTaskOpen] = useState(false);
+  const [transferSearch, setTransferSearch] = useState("");
+
   // Queries for editable fields
   const { data: workspaces } = trpc.workspaces.list.useQuery();
   const workspaceId = workspaces?.[0]?.id;
@@ -107,6 +117,15 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
       utils.tasks.list.invalidate();
       utils.tasks.myTasks.invalidate();
     },
+  });
+
+  const transferOwnership = trpc.tasks.transferOwnership.useMutation({
+    onSuccess: () => {
+      toast.success("Task ownership transferred!");
+      setTransferTaskOpen(false);
+      utils.tasks.get.invalidate({ id: taskId });
+    },
+    onError: (err) => toast.error(err.message || "Failed to transfer ownership"),
   });
 
   const createComment = trpc.comments.create.useMutation({
@@ -527,6 +546,12 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                 <Plus className="mr-2 h-4 w-4" />
                 Add subtask
               </DropdownMenuItem>
+              {task.createdById === session?.user?.id && (
+                <DropdownMenuItem onClick={() => setTransferTaskOpen(true)}>
+                  <ArrowRightLeft className="mr-2 h-4 w-4" />
+                  Transfer ownership
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => setFollowUpOpen(true)}>
                 <CopyPlus className="mr-2 h-4 w-4" />
                 Create follow-up task
@@ -773,7 +798,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                 className="h-6 text-[10px] px-2"
                 onClick={() => {
                   const today = new Date();
-                  today.setHours(0,0,0,0);
+                  today.setHours(0, 0, 0, 0);
                   updateTask.mutate({ id: taskId, dueDate: today.toISOString() });
                   toast.success("Scheduled for today");
                 }}
@@ -787,7 +812,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                 onClick={() => {
                   const nextWeek = new Date();
                   nextWeek.setDate(nextWeek.getDate() + 7);
-                  nextWeek.setHours(0,0,0,0);
+                  nextWeek.setHours(0, 0, 0, 0);
                   updateTask.mutate({ id: taskId, dueDate: nextWeek.toISOString() });
                   toast.success("Scheduled for next week");
                 }}
@@ -801,7 +826,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                 onClick={() => {
                   const later = new Date();
                   later.setDate(later.getDate() + 30);
-                  later.setHours(0,0,0,0);
+                  later.setHours(0, 0, 0, 0);
                   updateTask.mutate({ id: taskId, dueDate: later.toISOString() });
                   toast.success("Scheduled for later");
                 }}
@@ -890,10 +915,10 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                         p.name.toLowerCase().includes(projectSearch.toLowerCase()) &&
                         !task.taskProjects?.some((tp) => tp.project.id === p.id)
                     ).length === 0 && (
-                      <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                        No projects available
-                      </p>
-                    )}
+                        <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                          No projects available
+                        </p>
+                      )}
                   </div>
                 </PopoverContent>
               </Popover>
@@ -949,7 +974,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                       ?.filter(
                         (m) =>
                           (m.user.name?.toLowerCase().includes(peopleSearch.toLowerCase()) ||
-                           m.user.email?.toLowerCase().includes(peopleSearch.toLowerCase())) &&
+                            m.user.email?.toLowerCase().includes(peopleSearch.toLowerCase())) &&
                           !task.followers?.some((f) => f.user.id === m.user.id) &&
                           m.user.id !== task.assigneeId
                       )
@@ -977,14 +1002,14 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                     {members?.filter(
                       (m) =>
                         (m.user.name?.toLowerCase().includes(peopleSearch.toLowerCase()) ||
-                         m.user.email?.toLowerCase().includes(peopleSearch.toLowerCase())) &&
+                          m.user.email?.toLowerCase().includes(peopleSearch.toLowerCase())) &&
                         !task.followers?.some((f) => f.user.id === m.user.id) &&
                         m.user.id !== task.assigneeId
                     ).length === 0 && (
-                      <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                        No people available
-                      </p>
-                    )}
+                        <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                          No people available
+                        </p>
+                      )}
                   </div>
                 </PopoverContent>
               </Popover>
@@ -1012,11 +1037,11 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                         onClick={
                           isImage
                             ? () =>
-                                setProofingAttachment({
-                                  id: att.id,
-                                  url: att.fileUrl,
-                                  name: att.fileName,
-                                })
+                              setProofingAttachment({
+                                id: att.id,
+                                url: att.fileUrl,
+                                name: att.fileName,
+                              })
                             : undefined
                         }
                       >
@@ -1250,44 +1275,80 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
           </h3>
           <div className="space-y-1">
             {task.subtasks && task.subtasks.map((subtask) => (
-              <button
-                key={subtask.id}
-                className="flex w-full items-center gap-2 rounded px-2 py-1 hover:bg-muted/50 text-left"
-                onClick={() => setViewingSubtaskId(subtask.id)}
-              >
-                <span
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (subtask.status === "COMPLETE") {
-                      uncompleteTask.mutate({ id: subtask.id });
-                    } else {
-                      completeTask.mutate({ id: subtask.id });
-                    }
-                  }}
+              <div key={subtask.id} className="flex w-full items-center gap-2 rounded px-2 py-1 hover:bg-muted/50 group">
+                <button
+                  className="flex-1 flex items-center gap-2 text-left"
+                  onClick={() => setViewingSubtaskId(subtask.id)}
                 >
-                  {subtask.status === "COMPLETE" ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-600" />
-                  ) : (
-                    <Circle className="h-4 w-4 text-[#cfcbcb] hover:text-green-600" />
-                  )}
-                </span>
-                <span
-                  className={cn(
-                    "text-sm flex-1",
-                    subtask.status === "COMPLETE" &&
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (subtask.status === "COMPLETE") {
+                        uncompleteTask.mutate({ id: subtask.id });
+                      } else {
+                        completeTask.mutate({ id: subtask.id });
+                      }
+                    }}
+                  >
+                    {subtask.status === "COMPLETE" ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-600" />
+                    ) : (
+                      <Circle className="h-4 w-4 text-[#cfcbcb] hover:text-green-600" />
+                    )}
+                  </span>
+                  <span
+                    className={cn(
+                      "text-sm flex-1",
+                      subtask.status === "COMPLETE" &&
                       "text-muted-foreground line-through"
-                  )}
-                >
-                  {subtask.title}
-                </span>
-                {subtask.assignee && (
-                  <Avatar className="h-5 w-5" title={subtask.assignee.name ?? ""}>
-                    <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
-                      {subtask.assignee.name?.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
-                    </AvatarFallback>
-                  </Avatar>
-                )}
-              </button>
+                    )}
+                  >
+                    {subtask.title}
+                  </span>
+                </button>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button className={cn("h-6 w-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0", subtask.assignee && "opacity-100")}>
+                      {subtask.assignee ? (
+                        <Avatar className="h-5 w-5" title={subtask.assignee.name ?? ""}>
+                          <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
+                            {subtask.assignee.name?.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)}
+                          </AvatarFallback>
+                        </Avatar>
+                      ) : (
+                        <UserPlus className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                      )}
+                    </button>
+                  </PopoverTrigger>
+                  {/* Using a Portal so the popover isn't clipped by the side panel's overflow-y-auto */}
+                  <PopoverContent className="w-56 p-1 z-[9999]" align="end" side="left" sideOffset={8}>
+                    <button
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
+                      onClick={() => updateTask.mutate({ id: subtask.id, assigneeId: null })}
+                    >
+                      <User className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-muted-foreground">Unassigned</span>
+                    </button>
+                    {members?.map((m) => (
+                      <button
+                        key={m.user.id}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50",
+                          subtask.assigneeId === m.user.id && "bg-muted"
+                        )}
+                        onClick={() => updateTask.mutate({ id: subtask.id, assigneeId: m.user.id })}
+                      >
+                        <Avatar className="h-5 w-5">
+                          <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
+                            {m.user.name?.split(" ").map((n) => n[0]).join("")}
+                          </AvatarFallback>
+                        </Avatar>
+                        {m.user.name}
+                      </button>
+                    ))}
+                  </PopoverContent>
+                </Popover>
+              </div>
             ))}
             {showAddSubtask ? (
               <form onSubmit={(e) => { e.preventDefault(); if (newSubtaskTitle.trim()) { createTask.mutate({ title: newSubtaskTitle.trim(), parentTaskId: taskId, projectId: task.taskProjects?.[0]?.projectId, workspaceId: task.workspaceId }, { onSuccess: () => { utils.tasks.get.invalidate({ id: taskId }); setNewSubtaskTitle(""); setShowAddSubtask(false); } }); } }} className="flex items-center gap-2 px-2 py-1">
@@ -1317,7 +1378,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                 const isOwn = comment.authorId === session?.user?.id;
                 const wasEdited =
                   new Date(comment.updatedAt).getTime() -
-                    new Date(comment.createdAt).getTime() >
+                  new Date(comment.createdAt).getTime() >
                   1000;
 
                 return (
@@ -1515,6 +1576,59 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
           </div>
         </div>
       )}
+
+      {/* Transfer Ownership Dialog */}
+      <Dialog open={transferTaskOpen} onOpenChange={setTransferTaskOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Transfer Task Ownership</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="mb-4 text-sm text-muted-foreground">
+              Select a workspace member to transfer ownership of this task to.
+            </p>
+            <Input
+              value={transferSearch}
+              onChange={(e) => setTransferSearch(e.target.value)}
+              placeholder="Search members..."
+              className="mb-4"
+              autoFocus
+            />
+            <div className="max-h-60 overflow-y-auto space-y-1">
+              {members
+                ?.filter(
+                  (m) =>
+                    m.user.id !== session?.user?.id &&
+                    (m.user.name?.toLowerCase().includes(transferSearch.toLowerCase()) ||
+                      m.user.email?.toLowerCase().includes(transferSearch.toLowerCase()))
+                )
+                .map((m) => (
+                  <button
+                    key={m.user.id}
+                    className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors border border-transparent hover:bg-muted/50"
+                    onClick={() => {
+                      transferOwnership.mutate({
+                        taskId: taskId,
+                        newOwnerId: m.user.id,
+                      });
+                    }}
+                    disabled={transferOwnership.isPending}
+                  >
+                    <Avatar className="h-6 w-6">
+                      <AvatarFallback className="bg-[#4573D2] text-[10px] text-white">
+                        {m.user.name?.charAt(0).toUpperCase() || "U"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex flex-col items-start flex-1">
+                      <span className="font-medium">{m.user.name}</span>
+                      <span className="text-[10px] text-muted-foreground">{m.user.email}</span>
+                    </div>
+                  </button>
+                ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -19,6 +19,7 @@ import {
   GitBranch,
   MoreHorizontal,
   MessageCircle,
+  TableProperties,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
@@ -46,6 +47,7 @@ const insightsNav = [
   { label: "Portfolios", href: "/portfolios", icon: Briefcase },
   { label: "Goals", href: "/goals", icon: Target },
   { label: "Workflows", href: "/workflows", icon: GitBranch },
+  { label: "Monitoring", href: "/monitoring", icon: TableProperties },
 ];
 
 export function Sidebar() {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { Prisma } from "../../../../prisma/generated/prisma/client";
 import { router, protectedProcedure } from "../trpc";
 import { executeRules } from "../../services/rules-engine";
@@ -176,10 +177,18 @@ export const tasksRouter = router({
           OR: [
             { assigneeId: userId },
             { createdById: userId },
-            { taskProjects: { some: { project: { OR: [
-              { createdById: userId },
-              { members: { some: { userId } } },
-            ] } } } },
+            {
+              taskProjects: {
+                some: {
+                  project: {
+                    OR: [
+                      { createdById: userId },
+                      { members: { some: { userId } } },
+                    ]
+                  }
+                }
+              }
+            },
           ],
         },
         select: {
@@ -230,31 +239,65 @@ export const tasksRouter = router({
         throw new Error("No workspace found");
       }
 
+      // Handle subtasks default assignee
+      let finalAssigneeId = input.assigneeId;
+      if (input.parentTaskId && !finalAssigneeId) {
+        const parentTask = await ctx.prisma.task.findUnique({
+          where: { id: input.parentTaskId },
+          select: { assigneeId: true },
+        });
+        if (parentTask?.assigneeId) {
+          finalAssigneeId = parentTask.assigneeId;
+        }
+      }
+      if (!finalAssigneeId) {
+        finalAssigneeId = ctx.session.user.id;
+      }
+
+      // PERMISSION CHECK for ASSIGNMENT
+      if (input.assigneeId && input.assigneeId !== ctx.session.user.id && input.projectId) {
+        const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId } });
+        let isProjectAdmin = project?.createdById === ctx.session.user.id;
+        if (!isProjectAdmin) {
+          const mem = await ctx.prisma.projectMember.findUnique({
+            where: { projectId_userId: { projectId: input.projectId, userId: ctx.session.user.id } }
+          });
+          if (mem && mem.permission === "ADMIN") isProjectAdmin = true;
+        }
+
+        if (!isProjectAdmin) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Only Project Admins can assign tasks to other users."
+          });
+        }
+      }
+
       // Build task project link only if projectId provided
       const taskProjectData = input.projectId
         ? {
-            create: {
-              projectId: input.projectId,
-              sectionId: input.sectionId,
-              position: await (async () => {
-                const lastTaskProject = await ctx.prisma.taskProject.findFirst({
-                  where: {
-                    projectId: input.projectId!,
-                    sectionId: input.sectionId,
-                  },
-                  orderBy: { position: "desc" },
-                });
-                return (lastTaskProject?.position ?? 0) + 1;
-              })(),
-            },
-          }
+          create: {
+            projectId: input.projectId,
+            sectionId: input.sectionId,
+            position: await (async () => {
+              const lastTaskProject = await ctx.prisma.taskProject.findFirst({
+                where: {
+                  projectId: input.projectId!,
+                  sectionId: input.sectionId,
+                },
+                orderBy: { position: "desc" },
+              });
+              return (lastTaskProject?.position ?? 0) + 1;
+            })(),
+          },
+        }
         : undefined;
 
       const task = await ctx.prisma.task.create({
         data: {
           title: input.title,
           description: input.description,
-          assigneeId: input.assigneeId || ctx.session.user.id,
+          assigneeId: finalAssigneeId,
           dueDate: input.dueDate ? new Date(input.dueDate) : undefined,
           startDate: input.startDate ? new Date(input.startDate) : undefined,
           priority: input.priority,
@@ -321,6 +364,38 @@ export const tasksRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await verifyTaskAccess(ctx.prisma, input.id, ctx.session.user.id);
+
+      // PERMISSION CHECK for ASSIGNMENT
+      if (input.assigneeId !== undefined) {
+        const existingTask = await ctx.prisma.task.findUnique({
+          where: { id: input.id },
+          include: { taskProjects: true }
+        });
+
+        if (existingTask && existingTask.taskProjects.length > 0 && input.assigneeId !== existingTask.assigneeId) {
+          let isProjectAdmin = false;
+          for (const tp of existingTask.taskProjects) {
+            const proj = await ctx.prisma.project.findUnique({ where: { id: tp.projectId } });
+            if (proj?.createdById === ctx.session.user.id) {
+              isProjectAdmin = true; break;
+            }
+            const mem = await ctx.prisma.projectMember.findUnique({
+              where: { projectId_userId: { projectId: tp.projectId, userId: ctx.session.user.id } }
+            });
+            if (mem && mem.permission === "ADMIN") {
+              isProjectAdmin = true; break;
+            }
+          }
+
+          if (!isProjectAdmin) {
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "Only Project Admins can change task assignments."
+            });
+          }
+        }
+      }
+
       const { id, ...data } = input;
 
       const task = await ctx.prisma.task.update({
@@ -484,10 +559,10 @@ export const tasksRouter = router({
               dueDate: nextDueDate,
               startDate: task.startDate
                 ? new Date(
-                    nextDueDate.getTime() -
-                      ((task.dueDate?.getTime() ?? 0) -
-                        (task.startDate?.getTime() ?? 0))
-                  )
+                  nextDueDate.getTime() -
+                  ((task.dueDate?.getTime() ?? 0) -
+                    (task.startDate?.getTime() ?? 0))
+                )
                 : undefined,
               taskProjects: {
                 create: task.taskProjects.map((tp) => ({
@@ -920,5 +995,31 @@ export const tasksRouter = router({
         where: { id: input.id },
         data: { approvalStatus: input.approvalStatus },
       });
+    }),
+
+  transferOwnership: protectedProcedure
+    .input(
+      z.object({
+        taskId: z.string(),
+        newOwnerId: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const currentUserId = ctx.session.user.id;
+
+      const task = await ctx.prisma.task.findUnique({
+        where: { id: input.taskId },
+      });
+
+      if (!task || task.createdById !== currentUserId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the task creator can transfer ownership." });
+      }
+
+      await ctx.prisma.task.update({
+        where: { id: input.taskId },
+        data: { createdById: input.newOwnerId },
+      });
+
+      return { success: true };
     }),
 });

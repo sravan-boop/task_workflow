@@ -7,44 +7,45 @@ import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import Apple from "next-auth/providers/apple";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/server/db/prisma";
+import type { AdapterUser } from "next-auth/adapters";
 
 const providers: Provider[] = [
   Credentials({
-      name: "credentials",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
-      },
-      async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
-          return null;
-        }
+    name: "credentials",
+    credentials: {
+      email: { label: "Email", type: "email" },
+      password: { label: "Password", type: "password" },
+    },
+    async authorize(credentials) {
+      if (!credentials?.email || !credentials?.password) {
+        return null;
+      }
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email as string },
-        });
+      const user = await prisma.user.findUnique({
+        where: { email: credentials.email as string },
+      });
 
-        if (!user || !user.passwordHash) {
-          return null;
-        }
+      if (!user || !user.passwordHash) {
+        return null;
+      }
 
-        const isValid = await bcrypt.compare(
-          credentials.password as string,
-          user.passwordHash
-        );
+      const isValid = await bcrypt.compare(
+        credentials.password as string,
+        user.passwordHash
+      );
 
-        if (!isValid) {
-          return null;
-        }
+      if (!isValid) {
+        return null;
+      }
 
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          image: user.avatarUrl,
-        };
-      },
-    }),
+      return {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        image: user.avatarUrl,
+      };
+    },
+  }),
 ];
 
 // Only add Google provider when credentials are configured
@@ -53,6 +54,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      allowDangerousEmailAccountLinking: true,
     })
   );
 }
@@ -100,6 +102,39 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.sub = user.id;
       }
       return token;
+    },
+  },
+  events: {
+    async createUser({ user }: { user: any }) {
+      // When an OAuth user is created, set up default workspace and team
+      const existingMembership = await prisma.workspaceMember.findFirst({
+        where: { userId: user.id },
+      });
+      if (!existingMembership) {
+        const workspace = await prisma.workspace.create({
+          data: {
+            name: `${user.name || "My"}'s Workspace`,
+            members: {
+              create: {
+                userId: user.id,
+                role: "OWNER",
+              },
+            },
+          },
+        });
+        await prisma.team.create({
+          data: {
+            name: `${user.name || "My"}'s Team`,
+            workspaceId: workspace.id,
+            members: {
+              create: {
+                userId: user.id,
+                role: "LEAD",
+              },
+            },
+          },
+        });
+      }
     },
   },
 });

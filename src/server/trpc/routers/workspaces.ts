@@ -307,6 +307,26 @@ export const workspacesRouter = router({
         },
       });
 
+      // Auto-join primary team
+      const primaryTeam = await ctx.prisma.team.findFirst({
+        where: { workspaceId: workspace.id },
+        orderBy: { createdAt: "asc" },
+      });
+      if (primaryTeam) {
+        const existingTeamMember = await ctx.prisma.teamMember.findUnique({
+          where: { teamId_userId: { teamId: primaryTeam.id, userId: ctx.session.user.id } }
+        });
+        if (!existingTeamMember) {
+          await ctx.prisma.teamMember.create({
+            data: {
+              teamId: primaryTeam.id,
+              userId: ctx.session.user.id,
+              role: "MEMBER",
+            },
+          });
+        }
+      }
+
       return workspace;
     }),
 
@@ -381,7 +401,7 @@ export const workspacesRouter = router({
         });
       }
 
-      return ctx.prisma.workspaceMember.create({
+      const newMember = await ctx.prisma.workspaceMember.create({
         data: {
           workspaceId: input.workspaceId,
           userId: user.id,
@@ -389,6 +409,28 @@ export const workspacesRouter = router({
         },
         include: { user: true },
       });
+
+      // Auto-join primary team
+      const primaryTeam = await ctx.prisma.team.findFirst({
+        where: { workspaceId: input.workspaceId },
+        orderBy: { createdAt: "asc" },
+      });
+      if (primaryTeam) {
+        const existingTeamMember = await ctx.prisma.teamMember.findUnique({
+          where: { teamId_userId: { teamId: primaryTeam.id, userId: user.id } }
+        });
+        if (!existingTeamMember) {
+          await ctx.prisma.teamMember.create({
+            data: {
+              teamId: primaryTeam.id,
+              userId: user.id,
+              role: "MEMBER",
+            },
+          });
+        }
+      }
+
+      return newMember;
     }),
 
   // Find user by email and auto-add to workspace if not already a member
@@ -458,6 +500,26 @@ export const workspacesRouter = router({
             role: "MEMBER",
           },
         });
+      }
+
+      // Auto-join primary team
+      const primaryTeam = await ctx.prisma.team.findFirst({
+        where: { workspaceId: input.workspaceId },
+        orderBy: { createdAt: "asc" },
+      });
+      if (primaryTeam) {
+        const existingTeamMember = await ctx.prisma.teamMember.findUnique({
+          where: { teamId_userId: { teamId: primaryTeam.id, userId: user.id } }
+        });
+        if (!existingTeamMember) {
+          await ctx.prisma.teamMember.create({
+            data: {
+              teamId: primaryTeam.id,
+              userId: user.id,
+              role: "MEMBER",
+            },
+          });
+        }
       }
 
       return { emailSent: false, userId: user.id };

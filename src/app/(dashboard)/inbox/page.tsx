@@ -31,6 +31,8 @@ const NOTIFICATION_ICONS: Record<string, React.ReactNode> = {
   FOLLOWER_ADDED: <UserPlus className="h-4 w-4 text-[#4573D2]" />,
   APPROVAL_REQUEST: <CheckCircle2 className="h-4 w-4 text-[#AA62E3]" />,
   PORTFOLIO_SHARED: <Briefcase className="h-4 w-4 text-[#4573D2]" />,
+  OWNERSHIP_TRANSFER_REQUEST: <UserPlus className="h-4 w-4 text-[#4573D2]" />,
+  OWNERSHIP_TRANSFER_RESOLVED: <CheckCircle2 className="h-4 w-4 text-green-600" />
 };
 
 function formatTime(date: Date | string, now: Date | null) {
@@ -74,6 +76,13 @@ export default function InboxPage() {
   });
 
   const archiveAll = trpc.notifications.archiveAll.useMutation({
+    onSuccess: () => {
+      utils.notifications.list.invalidate();
+      utils.notifications.unreadCount.invalidate();
+    },
+  });
+
+  const respondToTransfer = trpc.ownership.respondToTransfer.useMutation({
     onSuccess: () => {
       utils.notifications.list.invalidate();
       utils.notifications.unreadCount.invalidate();
@@ -141,7 +150,6 @@ export default function InboxPage() {
         ))}
       </div>
 
-      {/* Notification List */}
       <div className="divide-y">
         {isLoading ? (
           <div className="space-y-0">
@@ -202,6 +210,31 @@ export default function InboxPage() {
                   <p className="mt-0.5 text-sm text-muted-foreground">
                     {notification.message}
                   </p>
+                )}
+                {notification.type === "OWNERSHIP_TRANSFER_REQUEST" && !notification.isRead && (
+                  <div className="mt-3 flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        respondToTransfer.mutate({ requestId: notification.resourceId, action: "ACCEPT" });
+                      }}
+                      disabled={respondToTransfer.isPending}
+                    >
+                      Accept
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        respondToTransfer.mutate({ requestId: notification.resourceId, action: "REJECT" });
+                      }}
+                      disabled={respondToTransfer.isPending}
+                    >
+                      Reject
+                    </Button>
+                  </div>
                 )}
                 <p className="mt-1 text-xs text-muted-foreground">
                   {formatTime(notification.createdAt, now)}

@@ -33,6 +33,7 @@ import {
   ListTree,
   FileText,
 } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { BulkActionsToolbar } from "@/components/task/bulk-actions-toolbar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -51,6 +52,7 @@ export function ProjectListView({
   onTaskClick,
   sortRules = [{ field: "created", order: "desc" }],
 }: ProjectListViewProps) {
+  const { data: session } = useSession();
   const { data: sections } = trpc.sections.list.useQuery({ projectId });
   const { data: tasks } = trpc.tasks.list.useQuery({ projectId });
   const utils = trpc.useUtils();
@@ -477,7 +479,7 @@ export function ProjectListView({
                       className={cn(
                         "flex-1 text-left text-sm flex items-center gap-1.5",
                         task.status === "COMPLETE" &&
-                          "text-muted-foreground line-through"
+                        "text-muted-foreground line-through"
                       )}
                     >
                       {(task as any).isMilestone && <Diamond className="h-3.5 w-3.5 text-amber-500 shrink-0" />}
@@ -486,9 +488,9 @@ export function ProjectListView({
                         <span className={cn(
                           "ml-1 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium",
                           (task as any).approvalStatus === "APPROVED" ? "bg-green-100 text-green-700" :
-                          (task as any).approvalStatus === "REJECTED" ? "bg-red-100 text-red-700" :
-                          (task as any).approvalStatus === "CHANGES_REQUESTED" ? "bg-orange-100 text-orange-700" :
-                          "bg-yellow-100 text-yellow-700"
+                            (task as any).approvalStatus === "REJECTED" ? "bg-red-100 text-red-700" :
+                              (task as any).approvalStatus === "CHANGES_REQUESTED" ? "bg-orange-100 text-orange-700" :
+                                "bg-yellow-100 text-yellow-700"
                         )}>
                           <ShieldCheck className="h-2.5 w-2.5" />
                           {(task as any).approvalStatus ? (task as any).approvalStatus.replace("_", " ") : "PENDING"}
@@ -509,24 +511,72 @@ export function ProjectListView({
                         </AvatarFallback>
                       </Avatar>
                     ) : (
-                      <span className="text-xs text-muted-foreground/50">—</span>
+                      <span className="text-xs text-muted-foreground/50 hover:text-foreground cursor-pointer" onClick={() => onTaskClick(task.id)}>Set assignee</span>
                     )}
                   </div>
-                  <div className="flex w-24 items-center justify-center">
-                    {task.priority ? (
-                      <span
-                        className={cn(
-                          "rounded-full px-2 py-0.5 text-[10px] font-medium",
-                          task.priority === "HIGH" && "bg-red-100 text-red-700",
-                          task.priority === "MEDIUM" && "bg-yellow-100 text-yellow-700",
-                          task.priority === "LOW" && "bg-blue-100 text-blue-700"
-                        )}
-                      >
-                        {task.priority === "HIGH" ? "High" : task.priority === "MEDIUM" ? "Medium" : "Low"}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground/50">—</span>
-                    )}
+                  <div className="flex w-24 items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                    {(() => {
+                      const isAssignee = task.assigneeId === session?.user?.id;
+                      const currentUserMember = members?.find(m => m.userId === session?.user?.id);
+                      const isLead = (currentUserMember?.role as any) === "LEAD" || (currentUserMember?.role as any) === "WORKSPACE_OWNER" || (currentUserMember?.role as any) === "WORKSPACE_ADMIN" || (currentUserMember?.role as any) === "ADMIN" || (currentUserMember?.role as any) === "OWNER";
+                      const canEdit = isAssignee || isLead;
+
+                      if (!canEdit) {
+                        return (
+                          <span
+                            className={cn(
+                              "rounded-full px-2 py-0.5 text-[10px] font-medium w-full text-center block",
+                              task.priority === "HIGH" && "bg-red-100 text-red-700",
+                              task.priority === "MEDIUM" && "bg-yellow-100 text-yellow-700",
+                              task.priority === "LOW" && "bg-blue-100 text-blue-700",
+                              !task.priority && "text-muted-foreground/70"
+                            )}
+                          >
+                            {task.priority === "HIGH" ? "High" : task.priority === "MEDIUM" ? "Medium" : task.priority === "LOW" ? "Low" : "-"}
+                          </span>
+                        );
+                      }
+
+                      return (
+                        <Select
+                          value={task.priority || "UNSET"}
+                          onValueChange={(val) => {
+                            updateTask.mutate({ id: task.id, priority: val === "UNSET" ? null : (val as any) });
+                          }}
+                        >
+                          <SelectTrigger className="h-6 w-[85px] border-none bg-transparent px-1 shadow-none focus:ring-0 [&>svg]:hidden hover:bg-muted/50 justify-center">
+                            <SelectValue>
+                              {task.priority ? (
+                                <span
+                                  className={cn(
+                                    "rounded-full px-2 py-0.5 text-[10px] font-medium w-full text-center block",
+                                    task.priority === "HIGH" && "bg-red-100 text-red-700",
+                                    task.priority === "MEDIUM" && "bg-yellow-100 text-yellow-700",
+                                    task.priority === "LOW" && "bg-blue-100 text-blue-700"
+                                  )}
+                                >
+                                  {task.priority === "HIGH" ? "High" : task.priority === "MEDIUM" ? "Medium" : "Low"}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground/70 hover:text-foreground transition-colors border border-dashed border-border px-2 py-0.5 rounded-full">Set priority</span>
+                              )}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="UNSET" className="text-xs">Unset</SelectItem>
+                            <SelectItem value="LOW" className="text-xs">
+                              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-400" /> Low</span>
+                            </SelectItem>
+                            <SelectItem value="MEDIUM" className="text-xs">
+                              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-yellow-400" /> Medium</span>
+                            </SelectItem>
+                            <SelectItem value="HIGH" className="text-xs">
+                              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-400" /> High</span>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      );
+                    })()}
                   </div>
                   <div className="flex w-32 items-center justify-center text-xs text-muted-foreground">
                     {task.dueDate ? (
@@ -538,17 +588,64 @@ export function ProjectListView({
                       <span className="text-muted-foreground/50">—</span>
                     )}
                   </div>
-                  <div className="flex w-24 items-center justify-center">
-                    <span
-                      className={cn(
-                        "rounded-full px-2 py-0.5 text-[10px] font-medium",
-                        task.status === "COMPLETE"
-                          ? "bg-green-100 text-green-700"
-                          : "bg-gray-100 text-gray-600"
-                      )}
-                    >
-                      {task.status === "COMPLETE" ? "Complete" : "Incomplete"}
-                    </span>
+                  <div className="flex w-24 items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                    {(() => {
+                      const isAssignee = task.assigneeId === session?.user?.id;
+                      const currentUserMember = members?.find(m => m.userId === session?.user?.id);
+                      const isLead = (currentUserMember?.role as any) === "LEAD" || (currentUserMember?.role as any) === "WORKSPACE_OWNER" || (currentUserMember?.role as any) === "WORKSPACE_ADMIN" || (currentUserMember?.role as any) === "ADMIN" || (currentUserMember?.role as any) === "OWNER";
+                      const canEdit = isAssignee || isLead;
+
+                      if (!canEdit) {
+                        return (
+                          <span
+                            className={cn(
+                              "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                              task.status === "COMPLETE"
+                                ? "bg-green-100 text-green-700"
+                                : "bg-gray-100 text-gray-600"
+                            )}
+                          >
+                            {task.status === "COMPLETE" ? "Complete" : "Incomplete"}
+                          </span>
+                        );
+                      }
+
+                      return (
+                        <Select
+                          value={task.status}
+                          onValueChange={(val) => {
+                            if (val === "COMPLETE") {
+                              completeTask.mutate({ id: task.id });
+                            } else {
+                              uncompleteTask.mutate({ id: task.id });
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="h-6 w-[85px] border-none bg-transparent px-1 shadow-none focus:ring-0 [&>svg]:hidden hover:bg-muted/50 justify-center">
+                            <SelectValue>
+                              <span
+                                className={cn(
+                                  "rounded-full px-2 py-0.5 text-[10px] font-medium w-full text-center block",
+                                  task.status === "COMPLETE"
+                                    ? "bg-green-100 text-green-700"
+                                    : "bg-gray-100 text-gray-600"
+                                )}
+                              >
+                                {task.status === "COMPLETE" ? "Complete" : "Incomplete"}
+                              </span>
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="IN_PROGRESS" className="text-xs">
+                              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-gray-400" /> Incomplete</span>
+                            </SelectItem>
+                            <SelectItem value="COMPLETE" className="text-xs">
+                              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-green-500" /> Complete</span>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      );
+                    })()}
                   </div>
                 </div>
               ))}
@@ -886,7 +983,7 @@ export function ProjectListView({
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50"
             onClick={() => {
               const today = new Date();
-              today.setHours(0,0,0,0);
+              today.setHours(0, 0, 0, 0);
               updateTask.mutate({ id: contextMenu.taskId, dueDate: today.toISOString() });
               setContextMenu(null);
             }}
@@ -898,7 +995,7 @@ export function ProjectListView({
             onClick={() => {
               const tomorrow = new Date();
               tomorrow.setDate(tomorrow.getDate() + 1);
-              tomorrow.setHours(0,0,0,0);
+              tomorrow.setHours(0, 0, 0, 0);
               updateTask.mutate({ id: contextMenu.taskId, dueDate: tomorrow.toISOString() });
               setContextMenu(null);
             }}
@@ -910,7 +1007,7 @@ export function ProjectListView({
             onClick={() => {
               const nextWeek = new Date();
               nextWeek.setDate(nextWeek.getDate() + 7);
-              nextWeek.setHours(0,0,0,0);
+              nextWeek.setHours(0, 0, 0, 0);
               updateTask.mutate({ id: contextMenu.taskId, dueDate: nextWeek.toISOString() });
               setContextMenu(null);
             }}

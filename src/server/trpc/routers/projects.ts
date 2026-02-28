@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
 import { realtime, REALTIME_EVENTS } from "../../services/realtime";
 import { verifyProjectAccess } from "../../services/authorization";
@@ -20,6 +21,10 @@ export const projectsRouter = router({
           OR: [
             { createdById: ctx.session.user.id },
             { members: { some: { userId: ctx.session.user.id } } },
+            {
+              privacy: "PUBLIC",
+              workspace: { members: { some: { userId: ctx.session.user.id } } }
+            },
           ],
         },
         include: {
@@ -45,6 +50,10 @@ export const projectsRouter = router({
           OR: [
             { createdById: ctx.session.user.id },
             { members: { some: { userId: ctx.session.user.id } } },
+            {
+              privacy: "PUBLIC",
+              workspace: { members: { some: { userId: ctx.session.user.id } } }
+            },
           ],
         },
         include: {
@@ -380,5 +389,42 @@ export const projectsRouter = router({
         where: { projectId: input.projectId },
         include: { user: { select: { id: true, name: true, email: true } } },
       });
+    }),
+
+  transferOwnership: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        newOwnerId: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const currentUserId = ctx.session.user.id;
+
+      const project = await ctx.prisma.project.findUnique({
+        where: { id: input.projectId },
+      });
+
+      if (!project || project.createdById !== currentUserId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the project owner can transfer ownership." });
+      }
+
+      await ctx.prisma.$transaction([
+        ctx.prisma.project.update({
+          where: { id: input.projectId },
+          data: { createdById: input.newOwnerId },
+        }),
+        ctx.prisma.projectMember.upsert({
+          where: { projectId_userId: { projectId: input.projectId, userId: input.newOwnerId } },
+          create: { projectId: input.projectId, userId: input.newOwnerId, permission: "ADMIN" },
+          update: { permission: "ADMIN" },
+        }),
+        ctx.prisma.projectMember.update({
+          where: { projectId_userId: { projectId: input.projectId, userId: currentUserId } },
+          data: { permission: "EDITOR" },
+        }),
+      ]);
+
+      return { success: true };
     }),
 });

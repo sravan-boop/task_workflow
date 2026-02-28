@@ -53,6 +53,8 @@ model User {
   createdProjects      Project[]          @relation("ProjectCreator")
   portfolioMemberships PortfolioMember[]
   projectMemberships   ProjectMember[]
+  sentTransferRequests     OwnershipTransferRequest[] @relation("TransferRequester")
+  receivedTransferRequests OwnershipTransferRequest[] @relation("TransferApprover")
 }
 
 model Account {
@@ -67,6 +69,7 @@ model Account {
   token_type        String?
   scope             String?
   id_token          String?
+  session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -143,6 +146,7 @@ model Team {
   id          String   @id @default(cuid())
   name        String
   description String?
+  inviteToken String?  @unique
   workspaceId String
   createdAt   DateTime @default(now())
 
@@ -569,6 +573,8 @@ enum NotificationType {
   DUE_DATE_APPROACHING
   TASK_OVERDUE
   PORTFOLIO_SHARED
+  OWNERSHIP_TRANSFER_REQUEST
+  OWNERSHIP_TRANSFER_RESOLVED
 }
 
 // ============================================================
@@ -860,6 +866,33 @@ model ApprovalRequest {
 
   @@index([taskId])
   @@index([approverId, status])
+}
+
+// ============================================================
+// OWNERSHIP TRANSFERS
+// ============================================================
+
+model OwnershipTransferRequest {
+  id              String         @id @default(cuid())
+  resourceType    String         // "PROJECT", "TEAM", "TASK"
+  resourceId      String
+  originalOwnerId String
+  newOwnerId      String
+  status          TransferStatus @default(PENDING)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  originalOwner User @relation("TransferRequester", fields: [originalOwnerId], references: [id], onDelete: Cascade)
+  newOwner      User @relation("TransferApprover", fields: [newOwnerId], references: [id], onDelete: Cascade)
+
+  @@index([newOwnerId, status])
+  @@index([resourceType, resourceId])
+}
+
+enum TransferStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
 }
 
 // ============================================================
