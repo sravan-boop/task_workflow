@@ -99,4 +99,76 @@ export const monitoringRouter = router({
             });
             return tasks;
         }),
+
+    getManagerFilters: protectedProcedure
+        .input(z.object({ workspaceId: z.string() }))
+        .query(async ({ ctx, input }) => {
+            const managers = await ctx.prisma.teamMember.findMany({
+                where: {
+                    team: { workspaceId: input.workspaceId },
+                    role: "MANAGER",
+                },
+                include: { user: { select: { id: true, name: true, email: true } } },
+            });
+            // Deduplicate by user id
+            const unique = [...new Map(managers.map((m) => [m.user.id, m.user])).values()];
+            return { managers: unique };
+        }),
+
+    getManagerData: protectedProcedure
+        .input(z.object({ workspaceId: z.string(), managerId: z.string() }))
+        .query(async ({ ctx, input }) => {
+            const manager = await ctx.prisma.user.findUnique({
+                where: { id: input.managerId },
+                select: { id: true, name: true, email: true },
+            });
+
+            if (!manager) {
+                throw new TRPCError({
+                    code: "NOT_FOUND",
+                    message: "Manager not found",
+                });
+            }
+
+            const managedMembers = await ctx.prisma.teamMember.findMany({
+                where: {
+                    managerId: input.managerId,
+                    team: { workspaceId: input.workspaceId },
+                },
+                include: { user: { select: { id: true, name: true, email: true } } },
+            });
+
+            const managedProjects = await ctx.prisma.project.findMany({
+                where: {
+                    managerId: input.managerId,
+                    workspaceId: input.workspaceId,
+                },
+                select: { id: true, name: true, color: true },
+            });
+
+            const memberUserIds = managedMembers.map((m) => m.userId);
+            const projectIds = managedProjects.map((p) => p.id);
+
+            let tasks: Awaited<ReturnType<typeof ctx.prisma.task.findMany>> = [];
+
+            if (memberUserIds.length || projectIds.length) {
+                tasks = await ctx.prisma.task.findMany({
+                    where: {
+                        workspaceId: input.workspaceId,
+                        parentTaskId: null,
+                        OR: [
+                            ...(memberUserIds.length ? [{ assigneeId: { in: memberUserIds } }] : []),
+                            ...(projectIds.length ? [{ taskProjects: { some: { projectId: { in: projectIds } } } }] : []),
+                        ],
+                    },
+                    include: {
+                        assignee: { select: { id: true, name: true, email: true } },
+                        taskProjects: { include: { project: { select: { id: true, name: true, color: true } } } },
+                    },
+                    orderBy: [{ status: "desc" }, { dueDate: "asc" }],
+                });
+            }
+
+            return { manager, managedMembers, managedProjects, tasks };
+        }),
 });

@@ -398,4 +398,246 @@ export const teamsRouter = router({
 
       return team;
     }),
+
+  assignManager: protectedProcedure
+    .input(z.object({ teamId: z.string(), userId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await ctx.prisma.team.findUnique({ where: { id: input.teamId } });
+      if (!team) throw new TRPCError({ code: "NOT_FOUND", message: "Team not found" });
+
+      const membership = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: input.teamId, userId: ctx.session.user.id } },
+      });
+      const wsMembership = await ctx.prisma.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId: team.workspaceId, userId: ctx.session.user.id } },
+      });
+      const isLead = membership?.role === "LEAD";
+      const isOwner = wsMembership?.role === "OWNER";
+      if (!isLead && !isOwner) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the team lead can manage managers." });
+      }
+
+      const targetMembership = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: input.teamId, userId: input.userId } },
+      });
+      if (!targetMembership) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "User is not a member of this team." });
+      }
+
+      const updated = await ctx.prisma.teamMember.update({
+        where: { teamId_userId: { teamId: input.teamId, userId: input.userId } },
+        data: { role: "MANAGER" },
+      });
+
+      realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: input.teamId } });
+
+      return updated;
+    }),
+
+  removeManager: protectedProcedure
+    .input(z.object({ teamId: z.string(), userId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await ctx.prisma.team.findUnique({ where: { id: input.teamId } });
+      if (!team) throw new TRPCError({ code: "NOT_FOUND", message: "Team not found" });
+
+      const membership = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: input.teamId, userId: ctx.session.user.id } },
+      });
+      const wsMembership = await ctx.prisma.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId: team.workspaceId, userId: ctx.session.user.id } },
+      });
+      const isLead = membership?.role === "LEAD";
+      const isOwner = wsMembership?.role === "OWNER";
+      if (!isLead && !isOwner) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the team lead can manage managers." });
+      }
+
+      const targetMembership = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: input.teamId, userId: input.userId } },
+      });
+      if (!targetMembership || targetMembership.role !== "MANAGER") {
+        throw new TRPCError({ code: "NOT_FOUND", message: "User is not a manager in this team." });
+      }
+
+      // Clear managerId from all team members who had this manager
+      await ctx.prisma.teamMember.updateMany({
+        where: { teamId: input.teamId, managerId: input.userId },
+        data: { managerId: null },
+      });
+
+      // Demote back to MEMBER
+      const updated = await ctx.prisma.teamMember.update({
+        where: { teamId_userId: { teamId: input.teamId, userId: input.userId } },
+        data: { role: "MEMBER" },
+      });
+
+      realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: input.teamId } });
+
+      return updated;
+    }),
+
+  assignManagerToMember: protectedProcedure
+    .input(z.object({ teamId: z.string(), memberId: z.string(), managerId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await ctx.prisma.team.findUnique({ where: { id: input.teamId } });
+      if (!team) throw new TRPCError({ code: "NOT_FOUND", message: "Team not found" });
+
+      const membership = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: input.teamId, userId: ctx.session.user.id } },
+      });
+      const wsMembership = await ctx.prisma.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId: team.workspaceId, userId: ctx.session.user.id } },
+      });
+      const isLead = membership?.role === "LEAD";
+      const isOwner = wsMembership?.role === "OWNER";
+      if (!isLead && !isOwner) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the team lead can manage managers." });
+      }
+
+      // Verify the managerId user actually has MANAGER role in the team
+      const managerMembership = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: input.teamId, userId: input.managerId } },
+      });
+      if (!managerMembership || managerMembership.role !== "MANAGER") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "The specified user is not a manager in this team." });
+      }
+
+      const updated = await ctx.prisma.teamMember.update({
+        where: { teamId_userId: { teamId: input.teamId, userId: input.memberId } },
+        data: { managerId: input.managerId },
+      });
+
+      realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: input.teamId } });
+
+      return updated;
+    }),
+
+  removeManagerFromMember: protectedProcedure
+    .input(z.object({ teamId: z.string(), memberId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await ctx.prisma.team.findUnique({ where: { id: input.teamId } });
+      if (!team) throw new TRPCError({ code: "NOT_FOUND", message: "Team not found" });
+
+      const membership = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: input.teamId, userId: ctx.session.user.id } },
+      });
+      const wsMembership = await ctx.prisma.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId: team.workspaceId, userId: ctx.session.user.id } },
+      });
+      const isLead = membership?.role === "LEAD";
+      const isOwner = wsMembership?.role === "OWNER";
+      if (!isLead && !isOwner) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the team lead can manage managers." });
+      }
+
+      const updated = await ctx.prisma.teamMember.update({
+        where: { teamId_userId: { teamId: input.teamId, userId: input.memberId } },
+        data: { managerId: null },
+      });
+
+      realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: input.teamId } });
+
+      return updated;
+    }),
+
+  assignManagerToProject: protectedProcedure
+    .input(z.object({ projectId: z.string(), managerId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId } });
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
+      if (!project.teamId) throw new TRPCError({ code: "BAD_REQUEST", message: "Project is not associated with a team." });
+
+      const team = await ctx.prisma.team.findUnique({ where: { id: project.teamId } });
+      if (!team) throw new TRPCError({ code: "NOT_FOUND", message: "Team not found" });
+
+      const membership = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: project.teamId, userId: ctx.session.user.id } },
+      });
+      const wsMembership = await ctx.prisma.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId: team.workspaceId, userId: ctx.session.user.id } },
+      });
+      const isLead = membership?.role === "LEAD";
+      const isOwner = wsMembership?.role === "OWNER";
+      if (!isLead && !isOwner) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the team lead can manage managers." });
+      }
+
+      // Verify the manager is a MANAGER in the project's team
+      const managerMembership = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: project.teamId, userId: input.managerId } },
+      });
+      if (!managerMembership || managerMembership.role !== "MANAGER") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "The specified user is not a manager in this team." });
+      }
+
+      const updated = await ctx.prisma.project.update({
+        where: { id: input.projectId },
+        data: { managerId: input.managerId },
+      });
+
+      realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: project.teamId } });
+
+      return updated;
+    }),
+
+  removeManagerFromProject: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await ctx.prisma.project.findUnique({ where: { id: input.projectId } });
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
+      if (!project.teamId) throw new TRPCError({ code: "BAD_REQUEST", message: "Project is not associated with a team." });
+
+      const team = await ctx.prisma.team.findUnique({ where: { id: project.teamId } });
+      if (!team) throw new TRPCError({ code: "NOT_FOUND", message: "Team not found" });
+
+      const membership = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: project.teamId, userId: ctx.session.user.id } },
+      });
+      const wsMembership = await ctx.prisma.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId: team.workspaceId, userId: ctx.session.user.id } },
+      });
+      const isLead = membership?.role === "LEAD";
+      const isOwner = wsMembership?.role === "OWNER";
+      if (!isLead && !isOwner) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the team lead can manage managers." });
+      }
+
+      const updated = await ctx.prisma.project.update({
+        where: { id: input.projectId },
+        data: { managerId: null },
+      });
+
+      realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: project.teamId } });
+
+      return updated;
+    }),
+
+  getManagers: protectedProcedure
+    .input(z.object({ teamId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const managers = await ctx.prisma.teamMember.findMany({
+        where: { teamId: input.teamId, role: "MANAGER" },
+        include: { user: true },
+      });
+
+      const managersWithCounts = await Promise.all(
+        managers.map(async (manager) => {
+          const membersManaged = await ctx.prisma.teamMember.count({
+            where: { teamId: input.teamId, managerId: manager.userId },
+          });
+          const projectsManaged = await ctx.prisma.project.count({
+            where: { teamId: input.teamId, managerId: manager.userId },
+          });
+          return {
+            ...manager,
+            _count: {
+              membersManaged,
+              projectsManaged,
+            },
+          };
+        })
+      );
+
+      return managersWithCounts;
+    }),
 });

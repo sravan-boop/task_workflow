@@ -36,7 +36,8 @@ model User {
   accounts             Account[]
   sessions             Session[]
   workspaceMemberships WorkspaceMember[]
-  teamMemberships      TeamMember[]
+  teamMemberships      TeamMember[]       @relation("TeamMemberUser")
+  managedMembers       TeamMember[]       @relation("TeamMemberManager")
   assignedTasks        Task[]             @relation("TaskAssignee")
   createdTasks         Task[]             @relation("TaskCreator")
   comments             Comment[]
@@ -51,6 +52,7 @@ model User {
   annotations          Annotation[]
   ownedGoals           Goal[]             @relation("GoalOwner")
   createdProjects      Project[]          @relation("ProjectCreator")
+  managedProjects      Project[]          @relation("ProjectManager")
   portfolioMemberships PortfolioMember[]
   projectMemberships   ProjectMember[]
   sentTransferRequests     OwnershipTransferRequest[] @relation("TransferRequester")
@@ -159,19 +161,23 @@ model Team {
 }
 
 model TeamMember {
-  id     String   @id @default(cuid())
-  teamId String
-  userId String
-  role   TeamRole @default(MEMBER)
+  id        String   @id @default(cuid())
+  teamId    String
+  userId    String
+  role      TeamRole @default(MEMBER)
+  managerId String?
 
-  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team    Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user    User  @relation("TeamMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  manager User? @relation("TeamMemberManager", fields: [managerId], references: [id])
 
   @@unique([teamId, userId])
+  @@index([managerId])
 }
 
 enum TeamRole {
   LEAD
+  MANAGER
   MEMBER
 }
 
@@ -193,12 +199,14 @@ model Project {
   workspaceId String
   teamId      String?
   createdById String
+  managerId   String?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
   workspace      Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   team           Team?                @relation(fields: [teamId], references: [id])
   createdBy      User                 @relation("ProjectCreator", fields: [createdById], references: [id])
+  manager        User?                @relation("ProjectManager", fields: [managerId], references: [id])
   sections       Section[]
   taskProjects   TaskProject[]
   customFields   ProjectCustomField[]

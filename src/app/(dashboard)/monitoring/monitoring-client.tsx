@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
-import { Briefcase, FolderDot, UserCircle2, AlertCircle, TableProperties, Check, ChevronDown } from "lucide-react";
+import { Briefcase, FolderDot, UserCircle2, AlertCircle, TableProperties, Check, ChevronDown, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
     DropdownMenu,
@@ -20,17 +20,24 @@ import {
     DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 export function MonitoringClient() {
     const { data: workspaces } = trpc.workspaces.list.useQuery();
     const workspaceId = workspaces?.[0]?.id;
 
-    const [viewType, setViewType] = useState<"projects" | "portfolios" | "people">("projects");
+    const [viewType, setViewType] = useState<"projects" | "portfolios" | "people" | "manager">("projects");
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [selectedManagerId, setSelectedManagerId] = useState<string>("");
 
     const { data: filters, isLoading: isLoadingFilters } = trpc.monitoring.getFilters.useQuery(
         { workspaceId: workspaceId! },
         { enabled: !!workspaceId }
+    );
+
+    const { data: managerFilters } = trpc.monitoring.getManagerFilters.useQuery(
+        { workspaceId: workspaceId! },
+        { enabled: !!workspaceId && viewType === "manager" }
     );
 
     // Queries for data based on selected view
@@ -49,8 +56,13 @@ export function MonitoringClient() {
         { enabled: viewType === "people" && selectedIds.length > 0 && !!workspaceId }
     );
 
+    const { data: managerData, isLoading: isLoadingManager } = trpc.monitoring.getManagerData.useQuery(
+        { workspaceId: workspaceId!, managerId: selectedManagerId },
+        { enabled: viewType === "manager" && !!selectedManagerId && !!workspaceId }
+    );
+
     // Compute Active Data
-    let activeTasks = [];
+    let activeTasks: any[] = [];
     let isFetchingData = false;
     if (viewType === "projects") {
         activeTasks = projectTasks || [];
@@ -58,20 +70,26 @@ export function MonitoringClient() {
     } else if (viewType === "portfolios") {
         activeTasks = portfolioTasks || [];
         isFetchingData = isLoadingPortfolio;
-    } else {
+    } else if (viewType === "people") {
         activeTasks = userTasks || [];
         isFetchingData = isLoadingUser;
+    } else if (viewType === "manager") {
+        activeTasks = managerData?.tasks || [];
+        isFetchingData = isLoadingManager;
     }
 
     // Auto-select first item when changing viewType
     const handleViewTypeChange = (value: string) => {
         setViewType(value as any);
         setSelectedIds([]);
+        setSelectedManagerId("");
     };
 
     if (!workspaceId) {
         return <div className="p-4 text-muted-foreground">Loading workspace...</div>;
     }
+
+    const hasSelection = viewType === "manager" ? !!selectedManagerId : selectedIds.length > 0;
 
     return (
         <div className="space-y-6">
@@ -80,7 +98,7 @@ export function MonitoringClient() {
                     Workspace Monitoring
                 </h1>
                 <p className="text-sm text-muted-foreground">
-                    Track and monitor tasks across the entire organization grouped by specific projects, portfolios, or individual members.
+                    Track and monitor tasks across the entire organization grouped by specific projects, portfolios, individual members, or managers.
                 </p>
             </div>
 
@@ -95,6 +113,7 @@ export function MonitoringClient() {
                             <SelectItem value="projects">Project</SelectItem>
                             <SelectItem value="portfolios">Portfolio</SelectItem>
                             <SelectItem value="people">Specific Person</SelectItem>
+                            <SelectItem value="manager">Manager</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
@@ -103,74 +122,97 @@ export function MonitoringClient() {
 
                 <div className="flex items-center gap-3 flex-1 flex-wrap">
                     <span className="text-sm font-medium whitespace-nowrap">Filter:</span>
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="outline" className="w-[300px] justify-between bg-background" disabled={isLoadingFilters}>
-                                {selectedIds.length > 0
-                                    ? `${selectedIds.length} ${viewType === "people" ? "people" : viewType} selected`
-                                    : `Select ${viewType === "people" ? "people" : viewType}...`}
-                                <ChevronDown className="h-4 w-4 opacity-50" />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent className="w-[300px] max-h-[300px] overflow-y-auto">
-                            {viewType === "projects" &&
-                                filters?.projects.map((p: any) => (
-                                    <DropdownMenuCheckboxItem
-                                        key={p.id}
-                                        checked={selectedIds.includes(p.id)}
-                                        onCheckedChange={(checked) => {
-                                            setSelectedIds(prev =>
-                                                checked ? [...prev, p.id] : prev.filter(id => id !== p.id)
-                                            );
-                                        }}
-                                    >
+
+                    {viewType === "manager" ? (
+                        <Select value={selectedManagerId || "placeholder"} onValueChange={(val) => setSelectedManagerId(val === "placeholder" ? "" : val)}>
+                            <SelectTrigger className="w-[300px] bg-background">
+                                <SelectValue placeholder="Select a manager..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {managerFilters?.managers?.map((mgr: any) => (
+                                    <SelectItem key={mgr.id} value={mgr.id}>
                                         <div className="flex items-center gap-2">
-                                            <FolderDot className="w-4 h-4 text-muted-foreground shrink-0" />
-                                            <span className="truncate">{p.name}</span>
+                                            <ShieldCheck className="w-4 h-4 text-blue-500 shrink-0" />
+                                            <span>{mgr.name}</span>
                                         </div>
-                                    </DropdownMenuCheckboxItem>
+                                    </SelectItem>
                                 ))}
-                            {viewType === "portfolios" &&
-                                filters?.portfolios.map((p: any) => (
-                                    <DropdownMenuCheckboxItem
-                                        key={p.id}
-                                        checked={selectedIds.includes(p.id)}
-                                        onCheckedChange={(checked) => {
-                                            setSelectedIds(prev =>
-                                                checked ? [...prev, p.id] : prev.filter(id => id !== p.id)
-                                            );
-                                        }}
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            <Briefcase className="w-4 h-4 text-muted-foreground shrink-0" />
-                                            <span className="truncate">{p.name}</span>
-                                        </div>
-                                    </DropdownMenuCheckboxItem>
-                                ))}
-                            {viewType === "people" &&
-                                filters?.users.map((u: any) => (
-                                    <DropdownMenuCheckboxItem
-                                        key={u.id}
-                                        checked={selectedIds.includes(u.id)}
-                                        onCheckedChange={(checked) => {
-                                            setSelectedIds(prev =>
-                                                checked ? [...prev, u.id] : prev.filter(id => id !== u.id)
-                                            );
-                                        }}
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            <UserCircle2 className="w-4 h-4 text-muted-foreground shrink-0" />
-                                            <span className="truncate">{u.name}</span>
-                                        </div>
-                                    </DropdownMenuCheckboxItem>
-                                ))}
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                    {selectedIds.length > 0 && (
+                                {(!managerFilters?.managers || managerFilters.managers.length === 0) && (
+                                    <SelectItem value="placeholder" disabled>No managers found</SelectItem>
+                                )}
+                            </SelectContent>
+                        </Select>
+                    ) : (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="outline" className="w-[300px] justify-between bg-background" disabled={isLoadingFilters}>
+                                    {selectedIds.length > 0
+                                        ? `${selectedIds.length} ${viewType === "people" ? "people" : viewType} selected`
+                                        : `Select ${viewType === "people" ? "people" : viewType}...`}
+                                    <ChevronDown className="h-4 w-4 opacity-50" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent className="w-[300px] max-h-[300px] overflow-y-auto">
+                                {viewType === "projects" &&
+                                    filters?.projects.map((p: any) => (
+                                        <DropdownMenuCheckboxItem
+                                            key={p.id}
+                                            checked={selectedIds.includes(p.id)}
+                                            onCheckedChange={(checked) => {
+                                                setSelectedIds(prev =>
+                                                    checked ? [...prev, p.id] : prev.filter(id => id !== p.id)
+                                                );
+                                            }}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <FolderDot className="w-4 h-4 text-muted-foreground shrink-0" />
+                                                <span className="truncate">{p.name}</span>
+                                            </div>
+                                        </DropdownMenuCheckboxItem>
+                                    ))}
+                                {viewType === "portfolios" &&
+                                    filters?.portfolios.map((p: any) => (
+                                        <DropdownMenuCheckboxItem
+                                            key={p.id}
+                                            checked={selectedIds.includes(p.id)}
+                                            onCheckedChange={(checked) => {
+                                                setSelectedIds(prev =>
+                                                    checked ? [...prev, p.id] : prev.filter(id => id !== p.id)
+                                                );
+                                            }}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <Briefcase className="w-4 h-4 text-muted-foreground shrink-0" />
+                                                <span className="truncate">{p.name}</span>
+                                            </div>
+                                        </DropdownMenuCheckboxItem>
+                                    ))}
+                                {viewType === "people" &&
+                                    filters?.users.map((u: any) => (
+                                        <DropdownMenuCheckboxItem
+                                            key={u.id}
+                                            checked={selectedIds.includes(u.id)}
+                                            onCheckedChange={(checked) => {
+                                                setSelectedIds(prev =>
+                                                    checked ? [...prev, u.id] : prev.filter(id => id !== u.id)
+                                                );
+                                            }}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <UserCircle2 className="w-4 h-4 text-muted-foreground shrink-0" />
+                                                <span className="truncate">{u.name}</span>
+                                            </div>
+                                        </DropdownMenuCheckboxItem>
+                                    ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
+
+                    {hasSelection && (
                         <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setSelectedIds([])}
+                            onClick={() => { setSelectedIds([]); setSelectedManagerId(""); }}
                             className="text-muted-foreground text-xs"
                         >
                             Clear
@@ -179,12 +221,62 @@ export function MonitoringClient() {
                 </div>
             </div>
 
-            {selectedIds.length === 0 ? (
+            {/* Manager summary cards */}
+            {viewType === "manager" && managerData && selectedManagerId && !isLoadingManager && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="rounded-xl border bg-background p-4">
+                        <p className="text-xs text-muted-foreground uppercase font-medium mb-1">Manager</p>
+                        <div className="flex items-center gap-2">
+                            <Avatar className="h-8 w-8">
+                                <AvatarFallback className="bg-blue-500 text-xs text-white">
+                                    {managerData.manager?.name?.charAt(0)?.toUpperCase() || "M"}
+                                </AvatarFallback>
+                            </Avatar>
+                            <div>
+                                <p className="text-sm font-medium">{managerData.manager?.name}</p>
+                                <p className="text-xs text-muted-foreground">{managerData.manager?.email}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="rounded-xl border bg-background p-4">
+                        <p className="text-xs text-muted-foreground uppercase font-medium mb-1">Managed People</p>
+                        <p className="text-2xl font-bold">{managerData.managedMembers?.length || 0}</p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                            {managerData.managedMembers?.slice(0, 5).map((m: any) => (
+                                <Badge key={m.userId} variant="outline" className="text-[10px]">
+                                    {m.user.name}
+                                </Badge>
+                            ))}
+                            {(managerData.managedMembers?.length || 0) > 5 && (
+                                <Badge variant="outline" className="text-[10px]">
+                                    +{managerData.managedMembers.length - 5} more
+                                </Badge>
+                            )}
+                        </div>
+                    </div>
+                    <div className="rounded-xl border bg-background p-4">
+                        <p className="text-xs text-muted-foreground uppercase font-medium mb-1">Managed Projects</p>
+                        <p className="text-2xl font-bold">{managerData.managedProjects?.length || 0}</p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                            {managerData.managedProjects?.slice(0, 5).map((p: any) => (
+                                <Badge key={p.id} variant="outline" className="text-[10px]">
+                                    <div className="h-2 w-2 rounded-sm mr-1" style={{ backgroundColor: p.color }} />
+                                    {p.name}
+                                </Badge>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {!hasSelection ? (
                 <div className="flex flex-col items-center justify-center p-20 text-center border rounded-xl border-dashed bg-muted/10">
                     <TableProperties className="h-10 w-10 text-muted-foreground/50 mb-4" />
                     <h3 className="text-lg font-medium text-foreground">Select a Filter to View Data</h3>
                     <p className="text-sm text-muted-foreground mt-1 max-w-md">
-                        Choose specific projects, portfolios, or people from the filters above to load an Excel-style monitoring table.
+                        {viewType === "manager"
+                            ? "Choose a manager from the dropdown above to view their team's tasks, projects, and progress."
+                            : "Choose specific projects, portfolios, or people from the filters above to load an Excel-style monitoring table."}
                     </p>
                 </div>
             ) : isFetchingData ? (
@@ -203,8 +295,8 @@ export function MonitoringClient() {
                             <thead className="text-xs text-muted-foreground uppercase bg-muted/40 border-b">
                                 <tr>
                                     <th className="px-6 py-4 font-medium">Task Name</th>
-                                    {viewType === "people" && <th className="px-6 py-4 font-medium">Project</th>}
-                                    {viewType !== "people" && <th className="px-6 py-4 font-medium">Assignee</th>}
+                                    <th className="px-6 py-4 font-medium">Project</th>
+                                    <th className="px-6 py-4 font-medium">Assignee</th>
                                     <th className="px-6 py-4 font-medium">Status</th>
                                     <th className="px-6 py-4 font-medium">Priority</th>
                                     <th className="px-6 py-4 font-medium">Due Date</th>
@@ -223,30 +315,24 @@ export function MonitoringClient() {
                                                 {task.title}
                                             </td>
 
-                                            {/* Only showing Project if viewing by Person */}
-                                            {viewType === "people" && (
-                                                <td className="px-6 py-4 text-muted-foreground truncate max-w-[200px]" title={projectNames}>
-                                                    {projectNames || "No Project"}
-                                                </td>
-                                            )}
+                                            <td className="px-6 py-4 text-muted-foreground truncate max-w-[200px]" title={projectNames}>
+                                                {projectNames || "No Project"}
+                                            </td>
 
-                                            {/* Only showing Assignee if viewing by Project/Portfolio */}
-                                            {viewType !== "people" && (
-                                                <td className="px-6 py-4">
-                                                    <div className="flex items-center gap-2">
-                                                        {task.assignee ? (
-                                                            <>
-                                                                <div className="h-6 w-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
-                                                                    {(task.assignee.name || task.assignee.email || "U")[0]?.toUpperCase()}
-                                                                </div>
-                                                                <span className="truncate">{task.assignee.name || task.assignee.email}</span>
-                                                            </>
-                                                        ) : (
-                                                            <span className="text-muted-foreground italic">Unassigned</span>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                            )}
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    {task.assignee ? (
+                                                        <>
+                                                            <div className="h-6 w-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
+                                                                {(task.assignee.name || task.assignee.email || "U")[0]?.toUpperCase()}
+                                                            </div>
+                                                            <span className="truncate">{task.assignee.name || task.assignee.email}</span>
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-muted-foreground italic">Unassigned</span>
+                                                    )}
+                                                </div>
+                                            </td>
 
                                             <td className="px-6 py-4">
                                                 <Badge

@@ -385,23 +385,23 @@ export const tasksRouter = router({
               projectEntries = parentTask?.taskProjects ?? [];
             }
 
-            let isTeamLead = false;
+            let isTeamLeadOrManager = false;
             for (const tp of projectEntries) {
               const proj = await ctx.prisma.project.findUnique({ where: { id: tp.projectId }, select: { teamId: true } });
               if (proj?.teamId) {
                 const teamMember = await ctx.prisma.teamMember.findUnique({
                   where: { teamId_userId: { teamId: proj.teamId, userId: ctx.session.user.id } }
                 });
-                if (teamMember?.role === "LEAD") {
-                  isTeamLead = true;
+                if (teamMember?.role === "LEAD" || teamMember?.role === "MANAGER") {
+                  isTeamLeadOrManager = true;
                   break;
                 }
               }
             }
-            if (!isTeamLead) {
+            if (!isTeamLeadOrManager) {
               throw new TRPCError({
                 code: "FORBIDDEN",
-                message: "Only Team Leads can assign subtasks to other users."
+                message: "Only Team Leads and Managers can assign subtasks to other users."
               });
             }
           } else if (existingTask.taskProjects.length > 0) {

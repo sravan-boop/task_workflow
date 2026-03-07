@@ -18,6 +18,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Users,
   UserPlus,
   Mail,
@@ -28,6 +35,9 @@ import {
   Link2,
   ArrowRightLeft,
   Pencil,
+  ShieldCheck,
+  ShieldMinus,
+  UserCog,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "next-auth/react";
@@ -104,6 +114,57 @@ export default function TeamPage() {
     },
     onError: (err) => toast.error(err.message || "Failed to rename team"),
   });
+
+  const assignManager = trpc.teams.assignManager.useMutation({
+    onSuccess: () => {
+      utils.teams.get.invalidate({ id: teamId });
+      toast.success("Manager role assigned!");
+    },
+    onError: (err) => toast.error(err.message || "Failed to assign manager"),
+  });
+
+  const removeManagerRole = trpc.teams.removeManager.useMutation({
+    onSuccess: () => {
+      utils.teams.get.invalidate({ id: teamId });
+      toast.success("Manager role removed");
+    },
+    onError: (err) => toast.error(err.message || "Failed to remove manager"),
+  });
+
+  const assignManagerToMember = trpc.teams.assignManagerToMember.useMutation({
+    onSuccess: () => {
+      utils.teams.get.invalidate({ id: teamId });
+      toast.success("Manager assigned to member");
+    },
+    onError: (err) => toast.error(err.message || "Failed to assign manager"),
+  });
+
+  const removeManagerFromMember = trpc.teams.removeManagerFromMember.useMutation({
+    onSuccess: () => {
+      utils.teams.get.invalidate({ id: teamId });
+      toast.success("Manager removed from member");
+    },
+    onError: (err) => toast.error(err.message || "Failed to remove manager"),
+  });
+
+  const assignManagerToProject = trpc.teams.assignManagerToProject.useMutation({
+    onSuccess: () => {
+      utils.teams.get.invalidate({ id: teamId });
+      toast.success("Manager assigned to project");
+    },
+    onError: (err) => toast.error(err.message || "Failed to assign manager"),
+  });
+
+  const removeManagerFromProject = trpc.teams.removeManagerFromProject.useMutation({
+    onSuccess: () => {
+      utils.teams.get.invalidate({ id: teamId });
+      toast.success("Manager removed from project");
+    },
+    onError: (err) => toast.error(err.message || "Failed to remove manager"),
+  });
+
+  // Get managers list for dropdowns
+  const managers = team?.members.filter((m) => m.role === "MANAGER") || [];
 
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,6 +286,9 @@ export default function TeamPage() {
                         .join("")
                         .toUpperCase()
                         .slice(0, 2);
+                      const memberManager = member.managerId
+                        ? team.members.find((m) => m.user.id === member.managerId)
+                        : null;
                       return (
                         <div
                           key={member.id}
@@ -235,19 +299,91 @@ export default function TeamPage() {
                               {initials || "U"}
                             </AvatarFallback>
                           </Avatar>
-                          <div className="flex-1">
+                          <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-[#1e1f21]">
                               {member.user.name}
                               {member.role === "LEAD" && (
                                 <Crown className="ml-1.5 inline h-3.5 w-3.5 text-yellow-500" />
                               )}
+                              {member.role === "MANAGER" && (
+                                <ShieldCheck className="ml-1.5 inline h-3.5 w-3.5 text-blue-500" />
+                              )}
                             </p>
                             <p className="text-xs text-muted-foreground">{member.user.email}</p>
+                            {memberManager && (
+                              <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1">
+                                <UserCog className="h-3 w-3" />
+                                Manager: {memberManager.user.name}
+                              </p>
+                            )}
                           </div>
-                          <Badge variant="outline" className="text-xs">
+                          <Badge
+                            variant="outline"
+                            className={`text-xs ${member.role === "MANAGER" ? "border-blue-300 bg-blue-50 text-blue-700" : ""}`}
+                          >
                             {member.role}
                           </Badge>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {/* Assign Manager dropdown - only for MEMBER role, only team lead can do this */}
+                            {canManageTeam && member.role === "MEMBER" && managers.length > 0 && (
+                              <Select
+                                value={member.managerId || "none"}
+                                onValueChange={(val) => {
+                                  if (val === "none") {
+                                    removeManagerFromMember.mutate({ teamId, memberId: member.user.id });
+                                  } else {
+                                    assignManagerToMember.mutate({ teamId, memberId: member.user.id, managerId: val });
+                                  }
+                                }}
+                              >
+                                <SelectTrigger className="h-8 w-[130px] text-xs">
+                                  <SelectValue placeholder="Assign mgr" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">No Manager</SelectItem>
+                                  {managers.map((mgr) => (
+                                    <SelectItem key={mgr.user.id} value={mgr.user.id}>
+                                      {mgr.user.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {/* Make Manager / Remove Manager - only team lead */}
+                            {canManageTeam && member.role === "MEMBER" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs font-medium gap-1"
+                                title="Make Manager"
+                                onClick={() => {
+                                  if (window.confirm(`Make ${member.user.name} a Manager?`)) {
+                                    assignManager.mutate({ teamId, userId: member.user.id });
+                                  }
+                                }}
+                                disabled={assignManager.isPending}
+                              >
+                                <ShieldCheck className="h-3 w-3" />
+                                Make Manager
+                              </Button>
+                            )}
+                            {canManageTeam && member.role === "MANAGER" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs font-medium gap-1 text-orange-600 border-orange-300 hover:bg-orange-50"
+                                title="Remove Manager Role"
+                                onClick={() => {
+                                  if (window.confirm(`Remove Manager role from ${member.user.name}? All members assigned to them will be unassigned.`)) {
+                                    removeManagerRole.mutate({ teamId, userId: member.user.id });
+                                  }
+                                }}
+                                disabled={removeManagerRole.isPending}
+                              >
+                                <ShieldMinus className="h-3 w-3" />
+                                Remove Manager
+                              </Button>
+                            )}
                             {canManageTeam && member.role !== "LEAD" && (
                               <Button
                                 variant="outline"
@@ -333,19 +469,52 @@ export default function TeamPage() {
                 <CardContent>
                   {team.projects.length > 0 ? (
                     <div className="space-y-2">
-                      {team.projects.map((project) => (
-                        <Link
-                          key={project.id}
-                          href={`/projects/${project.id}`}
-                          className="flex items-center gap-2 rounded-md p-2 text-sm hover:bg-muted/50"
-                        >
-                          <div
-                            className="h-3 w-3 rounded-sm"
-                            style={{ backgroundColor: project.color }}
-                          />
-                          <span className="truncate">{project.name}</span>
-                        </Link>
-                      ))}
+                      {team.projects.map((project: any) => {
+                        const projManager = project.managerId
+                          ? team.members.find((m) => m.user.id === project.managerId)
+                          : null;
+                        return (
+                          <div key={project.id} className="flex items-center gap-2 rounded-md p-2 text-sm hover:bg-muted/50">
+                            <Link href={`/projects/${project.id}`} className="flex items-center gap-2 flex-1 min-w-0">
+                              <div
+                                className="h-3 w-3 rounded-sm flex-shrink-0"
+                                style={{ backgroundColor: project.color }}
+                              />
+                              <span className="truncate">{project.name}</span>
+                              {projManager && (
+                                <span className="text-[10px] text-blue-600 flex items-center gap-0.5 flex-shrink-0">
+                                  <ShieldCheck className="h-2.5 w-2.5" />
+                                  {projManager.user.name}
+                                </span>
+                              )}
+                            </Link>
+                            {canManageTeam && managers.length > 0 && (
+                              <Select
+                                value={project.managerId || "none"}
+                                onValueChange={(val) => {
+                                  if (val === "none") {
+                                    removeManagerFromProject.mutate({ projectId: project.id });
+                                  } else {
+                                    assignManagerToProject.mutate({ projectId: project.id, managerId: val });
+                                  }
+                                }}
+                              >
+                                <SelectTrigger className="h-7 w-[110px] text-[10px]">
+                                  <SelectValue placeholder="Manager" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">No Manager</SelectItem>
+                                  {managers.map((mgr) => (
+                                    <SelectItem key={mgr.user.id} value={mgr.user.id}>
+                                      {mgr.user.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-xs text-muted-foreground">
