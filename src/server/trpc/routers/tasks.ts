@@ -372,26 +372,60 @@ export const tasksRouter = router({
           include: { taskProjects: true }
         });
 
-        if (existingTask && existingTask.taskProjects.length > 0 && input.assigneeId !== existingTask.assigneeId) {
-          let isProjectAdmin = false;
-          for (const tp of existingTask.taskProjects) {
-            const proj = await ctx.prisma.project.findUnique({ where: { id: tp.projectId } });
-            if (proj?.createdById === ctx.session.user.id) {
-              isProjectAdmin = true; break;
+        if (existingTask && input.assigneeId !== existingTask.assigneeId) {
+          // For subtasks, only team leads can assign to other users
+          if (existingTask.parentTaskId) {
+            // Get task projects (fall back to parent task's projects if subtask has none)
+            let projectEntries = existingTask.taskProjects;
+            if (projectEntries.length === 0 && existingTask.parentTaskId) {
+              const parentTask = await ctx.prisma.task.findUnique({
+                where: { id: existingTask.parentTaskId },
+                include: { taskProjects: true },
+              });
+              projectEntries = parentTask?.taskProjects ?? [];
             }
-            const mem = await ctx.prisma.projectMember.findUnique({
-              where: { projectId_userId: { projectId: tp.projectId, userId: ctx.session.user.id } }
-            });
-            if (mem && mem.permission === "ADMIN") {
-              isProjectAdmin = true; break;
-            }
-          }
 
-          if (!isProjectAdmin) {
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: "Only Project Admins can change task assignments."
-            });
+            let isTeamLead = false;
+            for (const tp of projectEntries) {
+              const proj = await ctx.prisma.project.findUnique({ where: { id: tp.projectId }, select: { teamId: true } });
+              if (proj?.teamId) {
+                const teamMember = await ctx.prisma.teamMember.findUnique({
+                  where: { teamId_userId: { teamId: proj.teamId, userId: ctx.session.user.id } }
+                });
+                if (teamMember?.role === "LEAD") {
+                  isTeamLead = true;
+                  break;
+                }
+              }
+            }
+            if (!isTeamLead) {
+              throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "Only Team Leads can assign subtasks to other users."
+              });
+            }
+          } else if (existingTask.taskProjects.length > 0) {
+            // For top-level tasks, project admins can assign
+            let isProjectAdmin = false;
+            for (const tp of existingTask.taskProjects) {
+              const proj = await ctx.prisma.project.findUnique({ where: { id: tp.projectId } });
+              if (proj?.createdById === ctx.session.user.id) {
+                isProjectAdmin = true; break;
+              }
+              const mem = await ctx.prisma.projectMember.findUnique({
+                where: { projectId_userId: { projectId: tp.projectId, userId: ctx.session.user.id } }
+              });
+              if (mem && mem.permission === "ADMIN") {
+                isProjectAdmin = true; break;
+              }
+            }
+
+            if (!isProjectAdmin) {
+              throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "Only Project Admins can change task assignments."
+              });
+            }
           }
         }
       }

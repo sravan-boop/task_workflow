@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { Resend } from "resend";
 import { router, protectedProcedure, publicProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import { realtime, REALTIME_EVENTS } from "../../services/realtime";
 
 export const teamsRouter = router({
   list: protectedProcedure
@@ -88,10 +89,14 @@ export const teamsRouter = router({
         throw new TRPCError({ code: "FORBIDDEN", message: "Only the team lead or workspace owner can update the team." });
       }
 
-      return ctx.prisma.team.update({
+      const updated = await ctx.prisma.team.update({
         where: { id: input.id },
         data: { name: input.name, description: input.description },
       });
+
+      realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: input.id } });
+
+      return updated;
     }),
 
   addMember: protectedProcedure
@@ -279,6 +284,8 @@ export const teamsRouter = router({
           data: { name: newTeamName },
         }),
       ]);
+
+      realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: input.teamId } });
 
       return { success: true };
     }),

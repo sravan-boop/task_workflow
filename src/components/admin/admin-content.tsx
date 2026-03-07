@@ -33,9 +33,11 @@ import {
   Crown,
   Download,
   FileArchive,
+  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { exportWorkspaceToZip } from "@/lib/export";
+import { useSession } from "next-auth/react";
 
 type MemberRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
 
@@ -100,6 +102,7 @@ export function AdminContent() {
   const { data: workspaces } = trpc.workspaces.list.useQuery();
   const workspace = workspaces?.[0];
   const utils = trpc.useUtils();
+  const { data: session } = useSession();
 
   // Real members from API
   const { data: realMembers } = trpc.workspaces.getMembers.useQuery(
@@ -107,12 +110,27 @@ export function AdminContent() {
     { enabled: !!workspace?.id }
   );
 
+  // Teams for team rename
+  const { data: teams } = trpc.teams.list.useQuery(
+    { workspaceId: workspace?.id ?? "" },
+    { enabled: !!workspace?.id }
+  );
+
+  const renameTeam = trpc.teams.update.useMutation({
+    onSuccess: () => {
+      utils.teams.list.invalidate();
+      utils.teams.get.invalidate();
+      toast.success("Team renamed successfully!");
+    },
+    onError: (err) => toast.error(err.message || "Failed to rename team"),
+  });
+
   const updateWorkspace = trpc.workspaces.update.useMutation({
     onSuccess: () => {
       utils.workspaces.list.invalidate();
       toast.success("Workspace settings saved");
     },
-    onError: () => toast.error("Failed to save workspace settings"),
+    onError: (err) => toast.error(err.message === "FORBIDDEN" ? "Only workspace owners and admins can update workspace settings." : (err.message || "Failed to save workspace settings")),
   });
 
   const exportQuery = trpc.workspaces.exportAll.useQuery(
@@ -162,6 +180,10 @@ export function AdminContent() {
   // Workspace settings state
   const [workspaceName, setWorkspaceName] = useState(workspace?.name || "My Workspace");
   const [workspaceDescription, setWorkspaceDescription] = useState("");
+
+  // Team rename state
+  const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
+  const [editingTeamName, setEditingTeamName] = useState("");
 
   // Security settings state
   const [minPasswordLength, setMinPasswordLength] = useState(true);
@@ -592,6 +614,93 @@ export function AdminContent() {
             </div>
           </div>
         </div>
+
+        {/* Team names */}
+        {teams && teams.length > 0 && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-[#1e1f21]">
+              Teams
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Team leads can rename their teams here.
+            </p>
+            <div className="space-y-2 mt-2">
+              {teams.map((t: any) => {
+                const isTeamLead = t.members?.some(
+                  (m: any) => m.userId === session?.user?.id && m.role === "LEAD"
+                );
+                const isWsOwner = realMembers?.some(
+                  (m: any) => m.userId === session?.user?.id && m.role === "OWNER"
+                );
+                const canRename = isTeamLead || isWsOwner;
+                const isEditing = editingTeamId === t.id;
+
+                return (
+                  <div key={t.id} className="flex items-center gap-2 rounded-md border px-3 py-2">
+                    {isEditing ? (
+                      <>
+                        <Input
+                          value={editingTeamName}
+                          onChange={(e) => setEditingTeamName(e.target.value)}
+                          className="h-8 text-sm flex-1"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && editingTeamName.trim() && editingTeamName !== t.name) {
+                              renameTeam.mutate({ id: t.id, name: editingTeamName.trim() });
+                              setEditingTeamId(null);
+                            } else if (e.key === "Escape") {
+                              setEditingTeamId(null);
+                            }
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          className="h-8 bg-[#4573D2] hover:bg-[#3A63B8]"
+                          disabled={!editingTeamName.trim() || editingTeamName === t.name || renameTeam.isPending}
+                          onClick={() => {
+                            if (editingTeamName.trim() && editingTeamName !== t.name) {
+                              renameTeam.mutate({ id: t.id, name: editingTeamName.trim() });
+                              setEditingTeamId(null);
+                            }
+                          }}
+                        >
+                          {renameTeam.isPending ? "Saving..." : "Save"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8"
+                          onClick={() => setEditingTeamId(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Users className="h-4 w-4 text-[#4573D2] flex-shrink-0" />
+                        <span className="text-sm flex-1">{t.name}</span>
+                        {canRename && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            title="Rename team"
+                            onClick={() => {
+                              setEditingTeamId(t.id);
+                              setEditingTeamName(t.name);
+                            }}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Danger zone */}
         <div className="rounded-lg border border-red-200 bg-red-50/50 p-4">

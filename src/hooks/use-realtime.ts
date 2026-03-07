@@ -125,6 +125,18 @@ export function useRealtime(workspaceId: string | undefined) {
         utils.notifications.unreadCount.invalidate();
       });
 
+      // Team events
+      es.addEventListener("team.updated", () => {
+        utils.teams.list.invalidate();
+        utils.teams.get.invalidate();
+        utils.workspaces.getMembers.invalidate();
+      });
+
+      // Workspace events
+      es.addEventListener("workspace.updated", () => {
+        utils.workspaces.list.invalidate();
+      });
+
       es.onerror = () => {
         es.close();
         // Reconnect after 5 seconds

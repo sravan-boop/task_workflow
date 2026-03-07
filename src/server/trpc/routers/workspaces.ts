@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { Resend } from "resend";
 import { router, protectedProcedure, publicProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import { realtime, REALTIME_EVENTS } from "../../services/realtime";
 
 export const workspacesRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -101,7 +102,7 @@ export const workspacesRouter = router({
         throw new TRPCError({ code: "FORBIDDEN" });
       }
 
-      return ctx.prisma.workspace.update({
+      const updated = await ctx.prisma.workspace.update({
         where: { id: input.id },
         data: {
           ...(input.name && { name: input.name }),
@@ -110,6 +111,10 @@ export const workspacesRouter = router({
           }),
         },
       });
+
+      realtime.publish({ type: REALTIME_EVENTS.WORKSPACE_UPDATED, workspaceId: input.id, data: {} });
+
+      return updated;
     }),
 
   getMembers: protectedProcedure

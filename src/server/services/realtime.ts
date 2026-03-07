@@ -188,4 +188,6 @@ export const REALTIME_EVENTS = {
   REPORT_DELETED: "report.deleted",
   SECTION_UPDATED: "section.updated",
   NOTIFICATION_NEW: "notification.new",
+  TEAM_UPDATED: "team.updated",
+  WORKSPACE_UPDATED: "workspace.updated",
 } as const;

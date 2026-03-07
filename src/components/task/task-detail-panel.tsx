@@ -117,6 +117,9 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
       utils.tasks.list.invalidate();
       utils.tasks.myTasks.invalidate();
     },
+    onError: (err) => {
+      toast.error(err.message || "Failed to update task");
+    },
   });
 
   const transferOwnership = trpc.tasks.transferOwnership.useMutation({
@@ -1321,7 +1324,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                     </button>
                   </PopoverTrigger>
                   {/* Using a Portal so the popover isn't clipped by the side panel's overflow-y-auto */}
-                  <PopoverContent className="w-56 p-1 z-[9999]" align="end" side="left" sideOffset={8}>
+                  <PopoverContent className="w-56 p-1 z-[9999]" align="end" side="top" sideOffset={8}>
                     <button
                       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
                       onClick={() => updateTask.mutate({ id: subtask.id, assigneeId: null })}
