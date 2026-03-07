@@ -365,7 +365,7 @@ export const projectsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await verifyProjectAccess(ctx.prisma, input.projectId, ctx.session.user.id);
-      return ctx.prisma.projectMember.upsert({
+      const result = await ctx.prisma.projectMember.upsert({
         where: {
           projectId_userId: {
             projectId: input.projectId,
@@ -379,6 +379,29 @@ export const projectsRouter = router({
           permission: input.permission,
         },
       });
+
+      // Notify user when added to a project
+      if (input.userId !== ctx.session.user.id) {
+        const [actor, project] = await Promise.all([
+          ctx.prisma.user.findUnique({ where: { id: ctx.session.user.id }, select: { name: true } }),
+          ctx.prisma.project.findUnique({ where: { id: input.projectId }, select: { name: true, workspaceId: true } }),
+        ]);
+        await ctx.prisma.notification.create({
+          data: {
+            userId: input.userId,
+            type: "TASK_ASSIGNED",
+            resourceType: "project",
+            resourceId: input.projectId,
+            actorId: ctx.session.user.id,
+            message: `${actor?.name ?? "Someone"} added you to project "${project?.name}"`,
+          },
+        });
+        if (project?.workspaceId) {
+          realtime.publish({ type: REALTIME_EVENTS.NOTIFICATION_NEW, workspaceId: project.workspaceId, data: {} });
+        }
+      }
+
+      return result;
     }),
 
   getMembers: protectedProcedure

@@ -166,6 +166,7 @@ model TeamMember {
   userId    String
   role      TeamRole @default(MEMBER)
   managerId String?
+  managerTeamName String?
 
   team    Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
   user    User  @relation("TeamMemberUser", fields: [userId], references: [id], onDelete: Cascade)

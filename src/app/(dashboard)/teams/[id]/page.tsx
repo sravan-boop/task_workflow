@@ -49,6 +49,8 @@ export default function TeamPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameName, setRenameName] = useState("");
+  const [managerTeamNameInput, setManagerTeamNameInput] = useState("");
+  const [editingManagerTeamName, setEditingManagerTeamName] = useState(false);
 
   const { data: team, isLoading } = trpc.teams.get.useQuery({ id: teamId });
   const utils = trpc.useUtils();
@@ -59,6 +61,9 @@ export default function TeamPage() {
   const isLead = currentUserRole === "LEAD";
   const isWorkspaceOwner = team?.workspace?.members.find((m) => m.userId === currentUserId)?.role === "OWNER";
   const canManageTeam = isLead || isWorkspaceOwner;
+  const isManager = currentUserRole === "MANAGER";
+  const currentManagerMember = isManager ? team?.members.find((m) => m.user.id === currentUserId) : null;
+  const myManagedMembers = team?.members.filter((m) => m.managerId === currentUserId) || [];
 
   const addMember = trpc.teams.addMember.useMutation({
     onSuccess: (data) => {
@@ -161,6 +166,15 @@ export default function TeamPage() {
       toast.success("Manager removed from project");
     },
     onError: (err) => toast.error(err.message || "Failed to remove manager"),
+  });
+
+  const updateManagerTeamName = trpc.teams.updateManagerTeamName.useMutation({
+    onSuccess: () => {
+      utils.teams.get.invalidate({ id: teamId });
+      toast.success("Sub-team name updated!");
+      setEditingManagerTeamName(false);
+    },
+    onError: (err) => toast.error(err.message || "Failed to update sub-team name"),
   });
 
   // Get managers list for dropdowns
@@ -425,6 +439,127 @@ export default function TeamPage() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Manager's Team Section */}
+            {(isManager || isLead) && (
+              <div className="lg:col-span-3 mt-4">
+                {isManager && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center justify-between text-base">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="h-4 w-4 text-blue-500" />
+                          {(currentManagerMember as any)?.managerTeamName || "My Team"}
+                        </div>
+                        {!editingManagerTeamName ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => {
+                              setManagerTeamNameInput((currentManagerMember as any)?.managerTeamName || "");
+                              setEditingManagerTeamName(true);
+                            }}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              value={managerTeamNameInput}
+                              onChange={(e) => setManagerTeamNameInput(e.target.value)}
+                              className="h-7 w-40 text-xs"
+                              placeholder="Sub-team name..."
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && managerTeamNameInput.trim()) {
+                                  updateManagerTeamName.mutate({ teamId, name: managerTeamNameInput.trim() });
+                                } else if (e.key === "Escape") {
+                                  setEditingManagerTeamName(false);
+                                }
+                              }}
+                            />
+                            <Button
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => {
+                                if (managerTeamNameInput.trim()) {
+                                  updateManagerTeamName.mutate({ teamId, name: managerTeamNameInput.trim() });
+                                }
+                              }}
+                              disabled={!managerTeamNameInput.trim()}
+                            >
+                              Save
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditingManagerTeamName(false)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        )}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {myManagedMembers.length > 0 ? (
+                        <div className="space-y-2">
+                          {myManagedMembers.map((member) => {
+                            const initials = member.user.name?.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
+                            return (
+                              <div key={member.id} className="flex items-center gap-3 rounded-lg border px-4 py-3">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarFallback className="bg-[#4573D2] text-xs text-white">
+                                    {initials || "U"}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium">{member.user.name}</p>
+                                  <p className="text-xs text-muted-foreground">{member.user.email}</p>
+                                </div>
+                                <Badge variant="outline" className="text-xs">{member.role}</Badge>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No team members assigned to you yet. Ask the team lead to assign members.</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Show all managers' sub-teams for lead overview */}
+                {isLead && managers.length > 0 && (
+                  <div className="space-y-4 mt-4">
+                    {managers.map((mgr) => {
+                      const mgrMembers = team.members.filter((m) => m.managerId === mgr.user.id);
+                      return (
+                        <Card key={mgr.id}>
+                          <CardHeader className="pb-3">
+                            <CardTitle className="flex items-center gap-2 text-sm">
+                              <ShieldCheck className="h-4 w-4 text-blue-500" />
+                              {(mgr as any).managerTeamName || `${mgr.user.name}'s Team`}
+                              <Badge variant="outline" className="text-[10px]">{mgrMembers.length} members</Badge>
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            {mgrMembers.length > 0 ? (
+                              <div className="flex flex-wrap gap-2">
+                                {mgrMembers.map((m) => (
+                                  <Badge key={m.id} variant="outline" className="text-xs py-1">
+                                    {m.user.name}
+                                  </Badge>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-muted-foreground">No members assigned</p>
+                            )}
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Invite & Info Card */}
             <div className="space-y-6">

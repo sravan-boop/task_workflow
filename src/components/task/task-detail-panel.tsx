@@ -91,6 +91,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showAddSubtask, setShowAddSubtask] = useState(false);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
+  const [newSubtaskAssigneeId, setNewSubtaskAssigneeId] = useState<string | null>(null);
   const [depSearch, setDepSearch] = useState("");
   const [blockingSearch, setBlockingSearch] = useState("");
   const [followUpOpen, setFollowUpOpen] = useState(false);
@@ -1354,9 +1355,54 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
               </div>
             ))}
             {showAddSubtask ? (
-              <form onSubmit={(e) => { e.preventDefault(); if (newSubtaskTitle.trim()) { createTask.mutate({ title: newSubtaskTitle.trim(), parentTaskId: taskId, projectId: task.taskProjects?.[0]?.projectId, workspaceId: task.workspaceId }, { onSuccess: () => { utils.tasks.get.invalidate({ id: taskId }); setNewSubtaskTitle(""); setShowAddSubtask(false); } }); } }} className="flex items-center gap-2 px-2 py-1">
+              <form onSubmit={(e) => { e.preventDefault(); if (newSubtaskTitle.trim()) { createTask.mutate({ title: newSubtaskTitle.trim(), parentTaskId: taskId, projectId: task.taskProjects?.[0]?.projectId, workspaceId: task.workspaceId, assigneeId: newSubtaskAssigneeId || undefined }, { onSuccess: () => { utils.tasks.get.invalidate({ id: taskId }); setNewSubtaskTitle(""); setNewSubtaskAssigneeId(null); setShowAddSubtask(false); } }); } }} className="flex items-center gap-2 px-2 py-1">
                 <Circle className="h-4 w-4 text-[#cfcbcb]" />
-                <Input value={newSubtaskTitle} onChange={(e) => setNewSubtaskTitle(e.target.value)} placeholder="Subtask name..." className="h-7 text-sm" autoFocus />
+                <Input value={newSubtaskTitle} onChange={(e) => setNewSubtaskTitle(e.target.value)} placeholder="Subtask name..." className="h-7 text-sm flex-1" autoFocus />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button type="button" className="flex items-center gap-1 h-7 px-1.5 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground">
+                      {newSubtaskAssigneeId ? (
+                        <Avatar className="h-5 w-5">
+                          <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
+                            {members?.find((m) => m.user.id === newSubtaskAssigneeId)?.user.name?.split(" ").map((n) => n[0]).join("")}
+                          </AvatarFallback>
+                        </Avatar>
+                      ) : (
+                        <UserPlus className="h-4 w-4" />
+                      )}
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-1 z-[9999]" align="end" side="top" sideOffset={8}>
+                    <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">Assign to</div>
+                    {newSubtaskAssigneeId && (
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50 text-muted-foreground"
+                        onClick={() => setNewSubtaskAssigneeId(null)}
+                      >
+                        <X className="h-4 w-4" /> Unassign
+                      </button>
+                    )}
+                    {members?.map((m) => (
+                      <button
+                        key={m.user.id}
+                        type="button"
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50",
+                          newSubtaskAssigneeId === m.user.id && "bg-muted"
+                        )}
+                        onClick={() => setNewSubtaskAssigneeId(m.user.id)}
+                      >
+                        <Avatar className="h-5 w-5">
+                          <AvatarFallback className="bg-[#4573D2] text-[8px] text-white">
+                            {m.user.name?.split(" ").map((n) => n[0]).join("")}
+                          </AvatarFallback>
+                        </Avatar>
+                        {m.user.name}
+                      </button>
+                    ))}
+                  </PopoverContent>
+                </Popover>
                 <Button type="submit" size="sm" className="h-7">Add</Button>
               </form>
             ) : (

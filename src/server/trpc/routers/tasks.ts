@@ -334,6 +334,7 @@ export const tasksRouter = router({
             message: `${actor?.name ?? "Someone"} assigned you to "${task.title}"`,
           },
         });
+        realtime.publish({ type: REALTIME_EVENTS.NOTIFICATION_NEW, workspaceId: workspaceId!, data: {} });
       }
 
       // Execute rules for TASK_ADDED (only if in a project)
@@ -610,6 +611,7 @@ export const tasksRouter = router({
         }
       }
 
+      realtime.publish({ type: REALTIME_EVENTS.NOTIFICATION_NEW, workspaceId: completedTask.workspaceId, data: {} });
       realtime.publish({ type: REALTIME_EVENTS.TASK_COMPLETED, workspaceId: completedTask.workspaceId, data: { taskId: completedTask.id } });
 
       return completedTask;

@@ -429,6 +429,20 @@ export const teamsRouter = router({
         data: { role: "MANAGER" },
       });
 
+      // Notify the user they've been made a manager
+      const actor = await ctx.prisma.user.findUnique({ where: { id: ctx.session.user.id }, select: { name: true } });
+      await ctx.prisma.notification.create({
+        data: {
+          userId: input.userId,
+          type: "TASK_ASSIGNED",
+          resourceType: "team",
+          resourceId: input.teamId,
+          actorId: ctx.session.user.id,
+          message: `${actor?.name ?? "Someone"} made you a Manager in ${team.name}`,
+        },
+      });
+      realtime.publish({ type: REALTIME_EVENTS.NOTIFICATION_NEW, workspaceId: team.workspaceId, data: {} });
+
       realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: input.teamId } });
 
       return updated;
@@ -507,6 +521,20 @@ export const teamsRouter = router({
         data: { managerId: input.managerId },
       });
 
+      const actor = await ctx.prisma.user.findUnique({ where: { id: ctx.session.user.id }, select: { name: true } });
+      const managerUser = await ctx.prisma.user.findUnique({ where: { id: input.managerId }, select: { name: true } });
+      await ctx.prisma.notification.create({
+        data: {
+          userId: input.memberId,
+          type: "TASK_ASSIGNED",
+          resourceType: "team",
+          resourceId: input.teamId,
+          actorId: ctx.session.user.id,
+          message: `${actor?.name ?? "Someone"} assigned ${managerUser?.name ?? "a manager"} as your manager`,
+        },
+      });
+      realtime.publish({ type: REALTIME_EVENTS.NOTIFICATION_NEW, workspaceId: team.workspaceId, data: {} });
+
       realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: input.teamId } });
 
       return updated;
@@ -575,6 +603,19 @@ export const teamsRouter = router({
         data: { managerId: input.managerId },
       });
 
+      const actor = await ctx.prisma.user.findUnique({ where: { id: ctx.session.user.id }, select: { name: true } });
+      await ctx.prisma.notification.create({
+        data: {
+          userId: input.managerId,
+          type: "TASK_ASSIGNED",
+          resourceType: "project",
+          resourceId: input.projectId,
+          actorId: ctx.session.user.id,
+          message: `${actor?.name ?? "Someone"} assigned you to manage project "${project.name}"`,
+        },
+      });
+      realtime.publish({ type: REALTIME_EVENTS.NOTIFICATION_NEW, workspaceId: team.workspaceId, data: {} });
+
       realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: project.teamId } });
 
       return updated;
@@ -608,6 +649,30 @@ export const teamsRouter = router({
       });
 
       realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: project.teamId } });
+
+      return updated;
+    }),
+
+  updateManagerTeamName: protectedProcedure
+    .input(z.object({ teamId: z.string(), name: z.string().min(1).max(100) }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await ctx.prisma.team.findUnique({ where: { id: input.teamId } });
+      if (!team) throw new TRPCError({ code: "NOT_FOUND", message: "Team not found" });
+
+      const membership = await ctx.prisma.teamMember.findUnique({
+        where: { teamId_userId: { teamId: input.teamId, userId: ctx.session.user.id } },
+      });
+
+      if (!membership || membership.role !== "MANAGER") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only managers can set their sub-team name." });
+      }
+
+      const updated = await ctx.prisma.teamMember.update({
+        where: { teamId_userId: { teamId: input.teamId, userId: ctx.session.user.id } },
+        data: { managerTeamName: input.name },
+      });
+
+      realtime.publish({ type: REALTIME_EVENTS.TEAM_UPDATED, workspaceId: team.workspaceId, data: { teamId: input.teamId } });
 
       return updated;
     }),
